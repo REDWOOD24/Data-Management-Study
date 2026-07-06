@@ -1,0 +1,12 @@
+{
+    "Grid_Name": "GRID",
+    "Sites_Information": "site_topology.json",
+    "Sites_Connection_Information": "site_connections.json",
+    "Dispatcher_Plugin": "../plugin/build/libDataManagementPlugin.dylib",
+    "Limited_Sites": [],
+    "Custom_Parameters":
+    {
+	"Num_of_Jobs": "200",
+	"output_file": "../output/events.db"
+    }
+}
