@@ -18,7 +18,7 @@
       "copy_to_move_threshold": 3
     },
     "proactive": {
-      "enabled": false,
+      "enabled": true,
       "interval": 500.0,
       "data_transfer_mode": "MOVE",
       "random_seed": 1337,
