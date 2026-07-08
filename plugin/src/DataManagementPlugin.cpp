@@ -3,6 +3,7 @@
 #include "workload_manager.h"
 #include "output.h"
 #include "policy.h"
+#include <random>
 
 class DataManagementPlugin : public DispatcherPlugin {
 
@@ -53,7 +54,9 @@ Job* DataManagementPlugin::assignJob(Job* job)
 
 void DataManagementPlugin::onSimulationStart()
 {
-  po->addPolicies();
+  /* configuration initialization  */
+  std::string policy_file = sg4::Engine::get_instance()->get_netzone_root()->get_property("data_policy");
+  po->configurePolicy(policy_file);
   ou->onSimulationStart();
 }
 
@@ -124,8 +127,7 @@ void DataManagementPlugin::onFileWriteEnd(Job* job, const std::string& filename,
 
 void DataManagementPlugin::onFileRequest(Job* j, std::string filename, long long filesize, std::unordered_set<std::string> file_locations, std::string& source_site, CGSim::FileTransferDecisionMode& mode)
 {
-   if(file_locations.find(j->comp_site) != file_locations.end()) source_site = j->comp_site;
-   else source_site = *(file_locations.begin());
+   po->onFileRequest(j, filename, filesize, file_locations, source_site, mode);
 }
 
 extern "C" DataManagementPlugin* createDataManagementPlugin()

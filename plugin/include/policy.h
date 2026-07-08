@@ -21,9 +21,17 @@ public:
     POLICY() = default;
     ~POLICY() = default;
 
-    void addPolicies();
+    /* Most of the structure of this policy is for proactive running in the background once configured. */
+    
+    /* A policy file is required. The returned policy_content is an optional json object. */
+    void configurePolicy(const std::string& policy_file);
+
+    /* Reactive transfer on demand. */
+    void onFileRequest(Job* j, std::string filename, long long filesize, std::unordered_set<std::string> file_locations, std::string& source_site, CGSim::FileTransferDecisionMode& mode);
 
 private:
+    json policy_content;     // policy content
+
     enum class FilePickMode {
         FIRST_FIT,
         LARGEST_FIT,
@@ -35,6 +43,11 @@ private:
         ESTIMATED_TRANSFER_TIME,
         LINK_LOAD,
         BANDWIDTH_ONLY
+    };
+
+    enum class CandidateDestinationPolicy {
+        REQUESTING_SITES_FIRST,
+        LEAST_UTILIZED_AMONG_REQUESTING
     };
 
     struct SiteUtil {
@@ -54,9 +67,36 @@ private:
         double estimated_time = 0.0;
     };
 
-    CGSim::Policy* storage_rebalance_policy();
-    CGSim::Policy* network_aware_rebalance_policy();
-    CGSim::Policy* hotset_replication_policy();
+    CGSim::Policy* storage_rebalance_policy(
+        float interval,
+        double high_utilization_threshold,
+        double low_utilization_threshold,
+        int max_transfers_per_tick,
+        FilePickMode file_pick,
+        bool skip_if_already_replica_on_destination,
+        CGSim::FileTransferDecisionMode mode
+    );
+    CGSim::Policy* network_aware_rebalance_policy(
+        float interval,
+        double high_utilization_threshold,
+        double low_utilization_threshold,
+        double max_path_load,
+        int max_transfers_per_tick,
+        FilePickMode file_pick,
+        PathMetricMode path_metric,
+        CGSim::FileTransferDecisionMode mode
+    );
+    CGSim::Policy* hotset_replication_policy(
+        float interval,
+        float hotness_window,
+        double hotness_threshold,
+        float prediction_horizon,
+        int target_replica_count,
+        CandidateDestinationPolicy candidate_destination_policy,
+        int max_transfers_per_tick,
+        CGSim::FileTransferDecisionMode mode
+    );
+    CGSim::Policy* custom_policy_agent_policy();
 
     void run_storage_rebalance(
         const std::string& policy_name,

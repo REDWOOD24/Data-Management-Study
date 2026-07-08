@@ -7,6 +7,7 @@
     "Custom_Parameters":
     {
 	"Num_of_Jobs": "200",
-	"output_file": "../output/events.db"
+	"output_file": "../output/events.db",
+    "data_policy": "data_policy_config.json"
     }
 }

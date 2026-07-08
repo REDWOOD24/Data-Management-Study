@@ -1,0 +1,73 @@
+{
+"Data_Management_Policy": {
+    "enabled": true,
+    "reactive": {
+      "enabled": true,
+      "prefer_local_replica": true,
+      "remote_source_template": [
+        0,
+        [
+          "first_replica",
+          "least_utilized_source",
+          "most_utilized_source",
+          "random_replica",
+          "custom_policy_agent"
+        ]
+      ],
+      "random_seed": 1337,
+      "copy_to_move_threshold": 3
+    },
+    "proactive": {
+      "enabled": true,
+      "interval": 1000.0,
+      "data_transfer_mode": "MOVE",
+      "random_seed": 1337,
+      "transfer_template": [
+        0,
+        [
+          "storage_rebalance",
+          "network_aware_rebalance",
+          "hotset_replication",
+          "custom_policy_agent"
+        ]
+      ],
+      "template_params": {
+        "storage_rebalance": {
+          "high_utilization_threshold": 0.05,
+          "low_utilization_threshold": 1.0,
+          "file_pick": [0, ["first_fit", "largest_fit", "smallest_fit", "random_fit"]],
+          "max_transfers_per_tick": 1,
+          "skip_if_already_replica_on_destination": true
+        },
+        "network_aware_rebalance": {
+          "high_utilization_threshold": 0.05,
+          "low_utilization_threshold": 1.0,
+          "path_metric": [0, ["estimated_transfer_time", "link_load", "bandwidth_only"]],
+          "max_path_load": 1.0,
+          "file_pick": [0, ["first_fit", "largest_fit", "smallest_fit", "random_fit"]],
+          "max_transfers_per_tick": 1
+        },
+        "hotset_replication": {
+          "hotness_window": 100,
+          "hotness_threshold": 0.08,
+          "prediction_horizon": 50,
+          "target_replica_count": 4,
+          "candidate_destination_policy": [0, ["requesting_sites_first", "least_utilized_among_requesting"]],
+          "max_transfers_per_tick": 1
+        },
+        "custom_policy_agent": {
+          "policy_id": "my_agent_v1",
+          "metric_keys": [
+            "site.storage_utilization",
+            "path.bandwidth",
+            "path.link_load",
+            "path.latency",
+            "file.hotness"
+          ],
+          "decision_timeout_ms": 5,
+          "fallback_template_index": 0
+        }
+      }
+    }
+  }
+}
