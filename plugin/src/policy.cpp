@@ -660,7 +660,7 @@ void POLICY::onFileRequest(Job* j, std::string filename, long long filesize, std
         return;
     }
     /* Otherwise, select a source site considering multiple replica situation. */
-    int template_index = int(this->policy_content["Data_Management_Policy"]["reactive"]["transfer_template"][0]);
+    int template_index = int(this->policy_content["Data_Management_Policy"]["reactive"]["remote_source_template"][0]);
     if(template_index == 0){
         /* first fit (same as default) */
         source_site = *(file_locations.begin());

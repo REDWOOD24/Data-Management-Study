@@ -18,8 +18,8 @@
       "copy_to_move_threshold": 3
     },
     "proactive": {
-      "enabled": true,
-      "interval": 1000.0,
+      "enabled": false,
+      "interval": 500.0,
       "data_transfer_mode": "MOVE",
       "random_seed": 1337,
       "transfer_template": [
@@ -33,8 +33,8 @@
       ],
       "template_params": {
         "storage_rebalance": {
-          "high_utilization_threshold": 0.05,
-          "low_utilization_threshold": 1.0,
+          "high_utilization_threshold": 0.2,
+          "low_utilization_threshold": 0.8,
           "file_pick": [0, ["first_fit", "largest_fit", "smallest_fit", "random_fit"]],
           "max_transfers_per_tick": 1,
           "skip_if_already_replica_on_destination": true

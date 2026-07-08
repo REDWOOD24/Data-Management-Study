@@ -141,7 +141,8 @@ Example settings include:
   "Limited_Sites": [],
   "Custom_Parameters": {
     "Num_of_Jobs": "200",
-    "output_file": "../output/events.db"
+    "output_file": "../output/events.db",
+    "data_policy": "data_policy_config.json"
   }
 }
 ```
@@ -156,6 +157,7 @@ Example settings include:
 | `Dispatcher_Plugin`            | Path to the compiled dispatcher plugin      |
 | `Num_of_Jobs`                  | Number of synthetic jobs to generate        |
 | `output_file`                  | SQLite database file used for event logging |
+| `data_policy`                  | data policy config JSON file                |
 
 ## Generating Configuration Files
 
@@ -233,6 +235,11 @@ config/config.json
 
 The exact run command depends on your local CGSim installation and executable name.
 
+Example:
+```
+config % ../../CGSim/build/cg-sim -c ./config.json  
+```
+
 ## Output
 
 Simulation results are stored in SQLite format:
@@ -284,15 +291,31 @@ ORDER BY TIME
 LIMIT 20;
 ```
 
+## Other Scripts Usage
+Convert db output file to csv file (offline, after execution)
+
+```
+  python3 scripts/export_events_to_csv.py \
+  --db /path/to/events.db \
+  --output /path/to/events.csv
+```
+
+Plot figures
+
+change directory to ```scripts/```, output figures under ```output/plots/``` 
+```
+pip install -r requirements.txt
+python plot_transfer_analysis.py
+```
 ## Development Notes
 
 The plugin is organized into the following main components:
 
 | Component                  | Purpose                                           |
 | -------------------------- | ------------------------------------------------- |
-| `DataManagementPlugin.cpp` | Main plugin entry point and CGSim callback wiring |
+| `DataManagementPlugin.cpp` | Main plugin entry point and CGSim callback wiring, mainly hooking reactive transfers to CGSim on demand |
 | `dispatcher.cpp`           | Job placement and CPU selection logic             |
 | `workload_manager.cpp`     | Synthetic workload generation                     |
-| `policy.cpp`               | Background data-management policies               |
+| `policy.cpp`               | data-management policies implementation           |
 | `output.cpp`               | SQLite event logging and utilization metrics      |
 
