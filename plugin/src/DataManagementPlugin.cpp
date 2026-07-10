@@ -72,6 +72,10 @@ void DataManagementPlugin::onJobExecutionStart(Job* job, simgrid::s4u::Exec cons
 
 void DataManagementPlugin::onJobExecutionEnd(Job* job, simgrid::s4u::Exec const& ex)
 {
+   // Exec finishes before output writes, so only release here when there are no outputs.
+   if (job->output_files.empty()) {
+     di->releaseJobStorage(job);
+   }
    ou->onJobExecutionEnd(job,ex);
 }
 
@@ -92,6 +96,9 @@ void DataManagementPlugin::onFileTransferStart(Job* job, const std::string& file
 
 void DataManagementPlugin::onFileTransferEnd(Job* job, const std::string& filename, const unsigned long long filesize, simgrid::s4u::Comm const& co, const std::string& src_site, const std::string& dst_site)
 {
+   if (dst_site == job->comp_site) {
+     di->commitStorage(job, filesize);
+   }
    ou->onFileTransferEnd(job,filename, filesize, co,src_site,dst_site);
 }
 
@@ -122,6 +129,7 @@ void DataManagementPlugin::onFileWriteStart(Job* job, const std::string& filenam
 
 void DataManagementPlugin::onFileWriteEnd(Job* job, const std::string& filename, const unsigned long long filesize, simgrid::s4u::Io const& io)
 {
+   di->commitOutputWrite(job, filesize);
    ou->onFileWriteEnd(job,filename, filesize, io);
 }
 

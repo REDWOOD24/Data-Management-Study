@@ -6,7 +6,8 @@
     "Limited_Sites": [],
     "Custom_Parameters":
     {
-	"Num_of_Jobs": "200",
+	"Num_of_Jobs": "-1",
+    "jobs_file": "../input/mimic_job.csv",
 	"output_file": "../output/events.db",
     "data_policy": "data_policy_config.json"
     }

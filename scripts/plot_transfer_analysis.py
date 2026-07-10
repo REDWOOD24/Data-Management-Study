@@ -18,12 +18,24 @@ REACTIVE_EVENT = "FileTransfer"
 PROACTIVE_EVENT = "BackGroundFileTransfer"
 TRANSFER_EVENTS = (REACTIVE_EVENT, PROACTIVE_EVENT)
 SITE_PATTERN = re.compile(r"^Site(\d+)$")
+SITE_SUFFIX_PATTERN = re.compile(r"^(.*_)(\d+)$")
+
+
+def format_site_label(site_name: str) -> str:
+    """Render the trailing site index with two digits (e.g. AGLT2_site_1 -> AGLT2_site_01)."""
+    match = SITE_SUFFIX_PATTERN.match(site_name)
+    if match:
+        return f"{match.group(1)}{int(match.group(2)):02d}"
+    return site_name
 
 
 def site_sort_key(site_name: str) -> tuple[int, str]:
-    match = SITE_PATTERN.match(site_name)
-    if match:
-        return int(match.group(1)), site_name
+    suffix_match = SITE_SUFFIX_PATTERN.match(site_name)
+    if suffix_match:
+        return int(suffix_match.group(2)), site_name
+    site_match = SITE_PATTERN.match(site_name)
+    if site_match:
+        return int(site_match.group(1)), site_name
     return 10**9, site_name
 
 
@@ -186,8 +198,8 @@ def plot_heatmap(sites: list[str], matrix: np.ndarray, output_path: Path) -> Non
 
     ax.set_xticks(range(len(sites)))
     ax.set_yticks(range(len(sites)))
-    ax.set_xticklabels(sites, rotation=90, fontsize=8)
-    ax.set_yticklabels(sites, fontsize=8)
+    ax.set_xticklabels([format_site_label(site) for site in sites], rotation=90, fontsize=8)
+    ax.set_yticklabels([format_site_label(site) for site in sites], fontsize=8)
     ax.set_xlabel("Destination site")
     ax.set_ylabel("Source site")
     ax.set_title("Transfer volume heatmap (reactive + proactive)\nCell = total bytes source → destination")
@@ -250,6 +262,11 @@ SITE_PLOT_FONT_LABEL = 13
 SITE_PLOT_FONT_TICK = 11
 SITE_PLOT_FONT_LEGEND = 11
 
+CONNECTION_PLOT_FONT_TITLE = 16
+CONNECTION_PLOT_FONT_LABEL = 13
+CONNECTION_PLOT_FONT_TICK = 11
+CONNECTION_PLOT_FONT_LEGEND = 11
+
 def plot_site_ingress_egress(
     sites: list[str],
     ingress_reactive: dict[str, float],
@@ -259,6 +276,8 @@ def plot_site_ingress_egress(
     avg_end_to_end: dict[str, float],
     avg_staging_time: dict[str, float],
     output_path: Path,
+    *,
+    show_end_to_end: bool = False,
 ) -> None:
     to_gib = lambda volumes: [volumes.get(site, 0.0) / (1024**3) for site in sites]
 
@@ -280,7 +299,7 @@ def plot_site_ingress_egress(
     bar_ingress_proactive = ingress_proactive_values + [mean_ingress_proactive]
     bar_egress_reactive = egress_reactive_values + [mean_egress_reactive]
     bar_egress_proactive = egress_proactive_values + [mean_egress_proactive]
-    x_labels = sites + ["Mean"]
+    x_labels = [format_site_label(site) for site in sites] + ["Mean"]
 
     x_sites = np.arange(len(sites), dtype=float)
     x_site_mean = len(sites) + SITE_MEAN_GAP
@@ -344,19 +363,20 @@ def plot_site_ingress_egress(
         markersize=5,
         label="Avg job staging time (alloc → exec start)",
     )
-    ax2.plot(
-        x_sites,
-        end_to_end_values,
-        color="#264653",
-        marker="o",
-        linestyle="-",
-        linewidth=2.0,
-        markersize=6,
-        markerfacecolor="#264653",
-        markeredgecolor="white",
-        markeredgewidth=0.8,
-        label="Avg job end-to-end time",
-    )
+    if show_end_to_end:
+        ax2.plot(
+            x_sites,
+            end_to_end_values,
+            color="#264653",
+            marker="o",
+            linestyle="-",
+            linewidth=2.0,
+            markersize=6,
+            markerfacecolor="#264653",
+            markeredgecolor="white",
+            markeredgewidth=0.8,
+            label="Avg job end-to-end time",
+        )
     ax2.plot(
         x_site_mean,
         mean_staging_time,
@@ -365,17 +385,18 @@ def plot_site_ingress_egress(
         linestyle="none",
         markersize=5,
     )
-    ax2.plot(
-        x_site_mean,
-        mean_end_to_end,
-        color="#264653",
-        marker="o",
-        linestyle="none",
-        markersize=6,
-        markerfacecolor="#264653",
-        markeredgecolor="white",
-        markeredgewidth=0.8,
-    )
+    if show_end_to_end:
+        ax2.plot(
+            x_site_mean,
+            mean_end_to_end,
+            color="#264653",
+            marker="o",
+            linestyle="none",
+            markersize=6,
+            markerfacecolor="#264653",
+            markeredgecolor="white",
+            markeredgewidth=0.8,
+        )
     ax2.set_ylabel("Average time (s)", fontsize=SITE_PLOT_FONT_LABEL)
     ax2.tick_params(axis="y", labelsize=SITE_PLOT_FONT_TICK)
 
@@ -390,8 +411,9 @@ def plot_site_ingress_egress(
         value
         for value in (
             staging_time_values
-            + end_to_end_values
-            + [mean_staging_time, mean_end_to_end]
+            + (end_to_end_values if show_end_to_end else [])
+            + [mean_staging_time]
+            + ([mean_end_to_end] if show_end_to_end else [])
         )
         if not np.isnan(value)
     ]
@@ -449,7 +471,10 @@ def plot_connection_totals(
     if not connections:
         raise ValueError("No connections matched the filtering criteria.")
 
-    labels = [f"{source} → {destination}" for source, destination in connections]
+    labels = [
+        f"{format_site_label(source)} → {format_site_label(destination)}"
+        for source, destination in connections
+    ]
     reactive_values = [
         connection_reactive.get((source, destination), 0.0) / (1024**3)
         for source, destination in connections
@@ -459,20 +484,31 @@ def plot_connection_totals(
         for source, destination in connections
     ]
 
-    fig_width = max(12, len(labels) * 0.35)
-    fig, ax = plt.subplots(figsize=(fig_width, 6))
+    fig_width = max(14, len(labels) * 0.42)
+    fig, ax = plt.subplots(figsize=(fig_width, 6.5))
     x = np.arange(len(labels))
 
     ax.bar(x, reactive_values, label="Reactive", color="#2a9d8f")
     ax.bar(x, proactive_values, bottom=reactive_values, label="Proactive", color="#8ecae6")
 
+    bar_totals = [reactive + proactive for reactive, proactive in zip(reactive_values, proactive_values)]
+    bar_max = max(bar_totals)
+    y_top = float(np.ceil((bar_max * 1.12) / 10.0) * 10.0)
+    ax.set_ylim(0, y_top)
+    setup_primary_y_axis(ax)
+
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=90, fontsize=8)
-    ax.set_xlabel("Site-to-site connection")
-    ax.set_ylabel("Transferred size (GiB)")
-    ax.set_title("Top site-to-site connections by total transfer volume")
-    ax.legend(loc="upper right", fontsize=8)
+    ax.set_xticklabels(labels, rotation=90, fontsize=CONNECTION_PLOT_FONT_TICK)
+    ax.set_xlabel("Site-to-site connection", fontsize=CONNECTION_PLOT_FONT_LABEL)
+    ax.set_ylabel("Transferred size (GiB)", fontsize=CONNECTION_PLOT_FONT_LABEL)
+    ax.set_title(
+        "Top site-to-site connections by total transfer volume",
+        fontsize=CONNECTION_PLOT_FONT_TITLE,
+    )
+    ax.tick_params(axis="y", labelsize=CONNECTION_PLOT_FONT_TICK)
+    ax.legend(loc="upper right", fontsize=CONNECTION_PLOT_FONT_LEGEND)
     ax.grid(axis="y", alpha=0.3)
+    ax.margins(x=0.01, y=0)
 
     fig.tight_layout()
     fig.savefig(output_path, dpi=150, bbox_inches="tight")
@@ -506,6 +542,11 @@ def main() -> None:
         type=float,
         default=0.0,
         help="Minimum total bytes for a connection to appear in the connection plot",
+    )
+    parser.add_argument(
+        "--show-end-to-end",
+        action="store_true",
+        help="Include avg job end-to-end time on the per-site ingress/egress plot (default: off)",
     )
     args = parser.parse_args()
 
@@ -541,6 +582,7 @@ def main() -> None:
         avg_end_to_end,
         avg_staging_time,
         site_bars_path,
+        show_end_to_end=args.show_end_to_end,
     )
 
     top_connections = select_top_connections(
