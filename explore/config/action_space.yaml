@@ -1,0 +1,143 @@
+implemented_only: true
+
+reactive_source_names:
+  - first_replica
+  - least_utilized_source
+  - most_utilized_source
+  - random_replica
+
+proactive_template_names:
+  - storage_rebalance
+  - network_aware_rebalance
+  - hotset_replication
+
+file_pick_names:
+  - first_fit
+  - largest_fit
+  - smallest_fit
+  - random_fit
+
+path_metric_names:
+  - estimated_transfer_time
+  - link_load
+  - bandwidth_only
+
+transfer_modes:
+  - COPY
+  - MOVE
+
+parameters:
+  reactive.prefer_local_replica:
+    type: bool
+    default: true
+  reactive.remote_source_template:
+    type: int
+    min: 0
+    max: 3
+    default: 0
+  reactive.random_seed:
+    type: int
+    min: 0
+    max: 999999
+    default: 1337
+
+  proactive.data_transfer_mode:
+    type: enum
+    choices: [COPY, MOVE]
+    default: MOVE
+  proactive.transfer_template:
+    type: int
+    min: 0
+    max: 2
+    default: 0
+
+  storage_rebalance.high_utilization_threshold:
+    type: float
+    min: 0.10
+    max: 0.50
+    default: 0.2
+    template: storage_rebalance
+  storage_rebalance.low_utilization_threshold:
+    type: float
+    min: 0.55
+    max: 0.95
+    default: 0.8
+    template: storage_rebalance
+  storage_rebalance.file_pick:
+    type: int
+    min: 0
+    max: 3
+    default: 0
+    template: storage_rebalance
+  storage_rebalance.skip_if_already_replica_on_destination:
+    type: bool
+    default: true
+    template: storage_rebalance
+
+  network_aware_rebalance.high_utilization_threshold:
+    type: float
+    min: 0.05
+    max: 0.40
+    default: 0.05
+    template: network_aware_rebalance
+  network_aware_rebalance.low_utilization_threshold:
+    type: float
+    min: 0.60
+    max: 1.0
+    default: 1.0
+    template: network_aware_rebalance
+  network_aware_rebalance.path_metric:
+    type: int
+    min: 0
+    max: 2
+    default: 0
+    template: network_aware_rebalance
+  network_aware_rebalance.max_path_load:
+    type: float
+    min: 0.1
+    max: 1.0
+    default: 1.0
+    template: network_aware_rebalance
+  network_aware_rebalance.file_pick:
+    type: int
+    min: 0
+    max: 3
+    default: 0
+    template: network_aware_rebalance
+
+  hotset_replication.hotness_threshold:
+    type: float
+    min: 0.01
+    max: 0.5
+    default: 0.08
+    template: hotset_replication
+  hotset_replication.target_replica_count:
+    type: int
+    min: 2
+    max: 10
+    default: 4
+    template: hotset_replication
+
+constraints:
+  - name: rebalance_threshold_order
+    params:
+      - storage_rebalance.high_utilization_threshold
+      - storage_rebalance.low_utilization_threshold
+    rule: high_lt_low
+  - name: rebalance_threshold_separation
+    params:
+      - storage_rebalance.high_utilization_threshold
+      - storage_rebalance.low_utilization_threshold
+    rule: min_separation
+    min_gap: 0.25
+  - name: network_rebalance_threshold_order
+    params:
+      - network_aware_rebalance.high_utilization_threshold
+      - network_aware_rebalance.low_utilization_threshold
+    rule: high_lt_low
+  - name: network_rebalance_threshold_separation
+    params:
+      - network_aware_rebalance.high_utilization_threshold
+      - network_aware_rebalance.low_utilization_threshold
+    rule: min_separation
+    min_gap: 0.25

@@ -144,6 +144,30 @@ private:
         const std::string& dst_site
     ) const;
 
+    bool site_has_file(
+        const std::string& site,
+        const std::string& filename
+    ) const;
+
+    bool is_file_in_flight_to_site(
+        const std::string& filename,
+        const std::string& dst_site
+    ) const;
+
+    void finalize_reactive_source(
+        Job* j,
+        const std::string& filename,
+        std::string& source_site
+    ) const;
+
+    bool try_background_transfer(
+        const std::string& filename,
+        const std::string& src_site,
+        const std::string& dst_site,
+        CGSim::FileTransferDecisionMode mode,
+        const std::string& policy_name
+    );
+
 
 private:
     std::mt19937 rng{1337};

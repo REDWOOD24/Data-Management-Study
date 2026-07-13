@@ -1,0 +1,13 @@
+cg_sim_bin: ../../CGSim/build/cg-sim
+repo_root: ..
+base_config: ../config/config.json
+base_topology: ../config/site_topology.json
+base_connections: ../config/site_connections.json
+base_policy: ../config/data_policy_config.json
+workload:
+  jobs_file: ../input/mimic_job.csv
+  num_jobs: -1
+sim_timeout_sec: 3600
+parallel_trials: 1
+failure_penalty: 1.0e6
+runs_dir: runs

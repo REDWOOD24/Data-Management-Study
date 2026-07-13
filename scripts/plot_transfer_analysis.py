@@ -180,6 +180,52 @@ def load_job_site_metrics(db_path: Path) -> tuple[dict[str, float], dict[str, fl
     return avg_end_to_end, avg_staging_time
 
 
+def load_global_job_timing(db_path: Path) -> tuple[float | None, float | None]:
+    """Return mean staging and end-to-end times across all jobs (not per-site means)."""
+    if not db_path.is_file():
+        return None, None
+
+    query = """
+        WITH job_times AS (
+            SELECT
+                jf.JOB_ID,
+                json_extract(jf.METADATA, '$.site') AS site,
+                ja.TIME AS alloc_time,
+                js.TIME AS exec_start_time,
+                (
+                    SELECT MAX(TIME)
+                    FROM EVENTS e
+                    WHERE e.JOB_ID = jf.JOB_ID
+                ) AS end_time
+            FROM EVENTS jf
+            JOIN EVENTS ja
+              ON ja.JOB_ID = jf.JOB_ID
+             AND ja.EVENT = 'JobAllocation'
+             AND ja.STATE = 'Finished'
+            JOIN EVENTS js
+              ON js.JOB_ID = jf.JOB_ID
+             AND js.EVENT = 'JobExecution'
+             AND js.STATE = 'Started'
+            WHERE jf.EVENT = 'JobExecution'
+              AND jf.STATE = 'Finished'
+        )
+        SELECT
+            AVG(exec_start_time - alloc_time) AS avg_staging_time,
+            AVG(end_time - alloc_time) AS avg_end_to_end
+        FROM job_times
+        WHERE site IS NOT NULL
+    """
+
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(query).fetchone()
+
+    if row is None or row[0] is None:
+        return None, None
+    staging = float(row[0])
+    end_to_end = float(row[1]) if row[1] is not None else None
+    return staging, end_to_end
+
+
 def format_bytes(value: float) -> str:
     units = ["B", "KB", "MB", "GB", "TB", "PB"]
     amount = float(value)
@@ -278,6 +324,8 @@ def plot_site_ingress_egress(
     output_path: Path,
     *,
     show_end_to_end: bool = False,
+    global_avg_staging_time: float | None = None,
+    global_avg_end_to_end_time: float | None = None,
 ) -> None:
     to_gib = lambda volumes: [volumes.get(site, 0.0) / (1024**3) for site in sites]
 
@@ -292,8 +340,16 @@ def plot_site_ingress_egress(
     mean_ingress_proactive = float(np.mean(ingress_proactive_values))
     mean_egress_reactive = float(np.mean(egress_reactive_values))
     mean_egress_proactive = float(np.mean(egress_proactive_values))
-    mean_end_to_end = float(np.nanmean(end_to_end_values))
-    mean_staging_time = float(np.nanmean(staging_time_values))
+    mean_end_to_end = (
+        global_avg_end_to_end_time
+        if global_avg_end_to_end_time is not None
+        else float(np.nanmean(end_to_end_values))
+    )
+    mean_staging_time = (
+        global_avg_staging_time
+        if global_avg_staging_time is not None
+        else float(np.nanmean(staging_time_values))
+    )
 
     bar_ingress_reactive = ingress_reactive_values + [mean_ingress_reactive]
     bar_ingress_proactive = ingress_proactive_values + [mean_ingress_proactive]
@@ -566,6 +622,7 @@ def main() -> None:
         connection_totals,
     ) = aggregate_transfer_data(transfers)
     avg_end_to_end, avg_staging_time = load_job_site_metrics(args.db)
+    global_avg_staging_time, global_avg_end_to_end_time = load_global_job_timing(args.db)
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
     heatmap_path = args.output_dir / "transfer_heatmap.png"
@@ -583,6 +640,8 @@ def main() -> None:
         avg_staging_time,
         site_bars_path,
         show_end_to_end=args.show_end_to_end,
+        global_avg_staging_time=global_avg_staging_time,
+        global_avg_end_to_end_time=global_avg_end_to_end_time,
     )
 
     top_connections = select_top_connections(

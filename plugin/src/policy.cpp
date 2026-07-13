@@ -251,11 +251,11 @@ void POLICY::run_storage_rebalance(
             }
 
             if (CGSim::get_file_manager()->is_in_flight(filename, src.site, dst.site)) continue;
-            CGSim::get_file_manager()->make_background_transfer(filename, src.site, dst.site, mode,policy_name);
-
-            transfers_started++;
-            if (transfers_started >= max_transfers_per_tick) {
-                return;
+            if (try_background_transfer(filename, src.site, dst.site, mode, policy_name)) {
+                transfers_started++;
+                if (transfers_started >= max_transfers_per_tick) {
+                    return;
+                }
             }
         }
     }
@@ -383,12 +383,11 @@ void POLICY::run_network_aware_rebalance(
             continue;
         }
 
-        CGSim::get_file_manager()->make_background_transfer(c.filename, c.src_site, c.dst_site, mode,policy_name);
-
-
-        transfers_started++;
-        if (transfers_started >= max_transfers_per_tick) {
-            return;
+        if (try_background_transfer(c.filename, c.src_site, c.dst_site, mode, policy_name)) {
+            transfers_started++;
+            if (transfers_started >= max_transfers_per_tick) {
+                return;
+            }
         }
     }
 }
@@ -461,7 +460,13 @@ void POLICY::run_hotset_replication(
 
         std::vector<std::string> src_candidates;
         for (const auto& site : hot.replicas) {
-            src_candidates.push_back(site);
+            if (site_has_file(site, hot.filename)) {
+                src_candidates.push_back(site);
+            }
+        }
+
+        if (src_candidates.empty()) {
+            continue;
         }
 
         std::sort(src_candidates.begin(), src_candidates.end(),
@@ -472,6 +477,7 @@ void POLICY::run_hotset_replication(
         std::vector<SiteUtil> dst_candidates;
         for (const auto& u : utils) {
             if (hot.replicas.find(u.site) == hot.replicas.end() &&
+                !site_has_file(u.site, hot.filename) &&
                 u.remaining >= filesize) {
                 dst_candidates.push_back(u);
             }
@@ -488,12 +494,11 @@ void POLICY::run_hotset_replication(
                     continue;
                 }
 
-                CGSim::get_file_manager()->make_background_transfer(hot.filename, src_site, dst.site, mode,policy_name);
-
-
-                transfers_started++;
-                if (transfers_started >= max_transfers_per_tick) {
-                    return;
+                if (try_background_transfer(hot.filename, src_site, dst.site, mode, policy_name)) {
+                    transfers_started++;
+                    if (transfers_started >= max_transfers_per_tick) {
+                        return;
+                    }
                 }
             }
         }
@@ -627,6 +632,79 @@ sg4::Link* POLICY::link_between_sites(
     return link;
 }
 
+bool POLICY::site_has_file(
+    const std::string& site,
+    const std::string& filename) const
+{
+    return CGSim::get_file_manager()->exists(filename, site);
+}
+
+bool POLICY::is_file_in_flight_to_site(
+    const std::string& filename,
+    const std::string& dst_site) const
+{
+    for (const auto& src_site : CGSim::get_site_manager()->get_all_sites()) {
+        if (CGSim::get_file_manager()->is_in_flight(filename, src_site, dst_site)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void POLICY::finalize_reactive_source(
+    Job* j,
+    const std::string& filename,
+    std::string& source_site) const
+{
+    if (site_has_file(j->comp_site, filename)) {
+        source_site = j->comp_site;
+        return;
+    }
+
+    if (site_has_file(source_site, filename)) {
+        return;
+    }
+
+    auto live_sites = CGSim::get_file_manager()->request_file_sites(filename);
+    if (live_sites.count(j->comp_site)) {
+        source_site = j->comp_site;
+    } else if (!live_sites.empty()) {
+        source_site = *(live_sites.begin());
+    }
+}
+
+bool POLICY::try_background_transfer(
+    const std::string& filename,
+    const std::string& src_site,
+    const std::string& dst_site,
+    CGSim::FileTransferDecisionMode mode,
+    const std::string& policy_name)
+{
+    if (src_site.empty() || dst_site.empty() || src_site == dst_site) {
+        return false;
+    }
+
+    if (!site_has_file(src_site, filename)) {
+        return false;
+    }
+
+    if (site_has_file(dst_site, filename)) {
+        return false;
+    }
+
+    if (is_file_in_flight_to_site(filename, dst_site)) {
+        return false;
+    }
+
+    if (CGSim::get_file_manager()->is_in_flight(filename, src_site, dst_site)) {
+        return false;
+    }
+
+    CGSim::get_file_manager()->make_background_transfer(
+        filename, src_site, dst_site, mode, policy_name);
+    return true;
+}
+
 void POLICY::onFileRequest(Job* j, std::string filename, long long filesize, std::unordered_set<std::string> file_locations, std::string& source_site, CGSim::FileTransferDecisionMode& mode)
 {
    /*
@@ -641,22 +719,21 @@ void POLICY::onFileRequest(Job* j, std::string filename, long long filesize, std
         if(file_locations.find(j->comp_site) != file_locations.end()){
         source_site = j->comp_site;
         }else source_site = *(file_locations.begin());
+        finalize_reactive_source(j, filename, source_site);
         return;
     }
 
-    /* If local replica is preferred, check if the local replica is available regardless of the policy. */
-    if(this->policy_content["Data_Management_Policy"]["reactive"]["prefer_local_replica"] == true){
-        /* Found local replica */
-        if(file_locations.find(j->comp_site) != file_locations.end()){
+    /* Always use a local replica when available to avoid staging to a site that already has the file. */
+    if(site_has_file(j->comp_site, filename)){
         source_site = j->comp_site;
         return;
-        }
     }
     /* ------------------------------------------------------------------------------------------------ */
     /* non-local replica situation */
     /* If there is only one replica, use it directly regardless of the policy. */
     if(file_locations.size() == 1){
         source_site = *(file_locations.begin());
+        finalize_reactive_source(j, filename, source_site);
         return;
     }
     /* Otherwise, select a source site considering multiple replica situation. */
@@ -664,41 +741,72 @@ void POLICY::onFileRequest(Job* j, std::string filename, long long filesize, std
     if(template_index == 0){
         /* first fit (same as default) */
         source_site = *(file_locations.begin());
+        finalize_reactive_source(j, filename, source_site);
         return;
     }else if(template_index == 1){
-        /* least utilized source */
+        /* least utilized source among replicas */
         auto utils = get_site_utils();
         float min_util = std::numeric_limits<float>::max();
+        bool found = false;
+        source_site = *(file_locations.begin());
         for(const auto& s : utils){
-        if(s.util < min_util){
+        if(file_locations.find(s.site) == file_locations.end()){
+            continue;
+        }
+        if(!site_has_file(s.site, filename)){
+            continue;
+        }
+        if(!found || s.util < min_util){
             min_util = s.util;
             source_site = s.site;
+            found = true;
         }
         }
+        finalize_reactive_source(j, filename, source_site);
         return;
     }else if(template_index == 2){
-        /* most utilized source */
+        /* most utilized source among replicas */
         auto utils = get_site_utils();
-        float max_util = std::numeric_limits<float>::min();
+        float max_util = std::numeric_limits<float>::lowest();
+        bool found = false;
+        source_site = *(file_locations.begin());
         for(const auto& s : utils){
-        if(s.util > max_util){
+        if(file_locations.find(s.site) == file_locations.end()){
+            continue;
+        }
+        if(!site_has_file(s.site, filename)){
+            continue;
+        }
+        if(!found || s.util > max_util){
             max_util = s.util;
             source_site = s.site;
+            found = true;
         }
         }
+        finalize_reactive_source(j, filename, source_site);
         return;
     }else if(template_index == 3){
         /* random replica */
+        std::vector<std::string> valid_locations;
+        for (const auto& loc : file_locations) {
+            if (site_has_file(loc, filename)) {
+                valid_locations.push_back(loc);
+            }
+        }
+        if (valid_locations.empty()) {
+            finalize_reactive_source(j, filename, source_site);
+            return;
+        }
         std::mt19937 rng{this->policy_content["Data_Management_Policy"]["reactive"]["random_seed"]};
-        std::uniform_int_distribution<int> dist(0, file_locations.size() - 1);
-        auto it = file_locations.begin();
-        std::advance(it, dist(rng));
-        source_site = *it;
+        std::uniform_int_distribution<int> dist(0, static_cast<int>(valid_locations.size()) - 1);
+        source_site = valid_locations[dist(rng)];
+        finalize_reactive_source(j, filename, source_site);
         return;
     }else if(template_index == 4){
         /* custom policy agent */
         std::cerr << "[WARNING] Custom policy agent is not implemented yet. Using default policy instead." << std::endl;
         source_site = *(file_locations.begin());
+        finalize_reactive_source(j, filename, source_site);
         return;
     }
 }

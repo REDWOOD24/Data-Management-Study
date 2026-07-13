@@ -1,3 +1,11 @@
 logs/
 output/
 plugin/build/
+explore/runs/
+explore/.venv/
+explore/.mplconfig/
+explore/src/datamgmt_explore/__pycache__/
+explore/src/datamgmt_explore/plotting/__pycache__/
+explore/src/datamgmt_explore/agents/__pycache__/
+explore/src/datamgmt_explore/objectives/__pycache__/
+explore/scripts/__pycache__/

@@ -1,0 +1,19 @@
+default_objective: tail_bulk_staging_cost
+default_aggregation: mean
+reward_transform: neg_log1p
+
+objectives:
+  avg_staging_time:
+    module: datamgmt_explore.objectives.avg_staging_time
+    class: AvgStagingTimeObjective
+    aggregation: mean
+  p95_max_staging_reward:
+    module: datamgmt_explore.objectives.p95_max_staging_reward
+    class: P95MaxStagingRewardObjective
+    tail_weight: 3.0
+  tail_bulk_staging_cost:
+    module: datamgmt_explore.objectives.tail_bulk_staging_cost
+    class: TailBulkStagingCostObjective
+    bottom_weight: 0.05
+    top_weight: 0.95
+    tail_fraction: 0.01
