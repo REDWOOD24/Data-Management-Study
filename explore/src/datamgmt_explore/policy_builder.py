@@ -18,9 +18,12 @@ class PolicyConfigBuilder:
         self,
         action_space: ActionSpace,
         base_policy_path: Path | None = None,
+        *,
+        drop_in_transfers_file: Path | None = None,
     ) -> None:
         self.action_space = action_space
         self.base_policy_path = base_policy_path
+        self.drop_in_transfers_file = drop_in_transfers_file
         self._base_policy = self._load_base_policy(base_policy_path)
 
     def _load_base_policy(self, base_policy_path: Path | None) -> dict[str, Any]:
@@ -42,6 +45,10 @@ class PolicyConfigBuilder:
         policy = copy.deepcopy(self._base_policy)
         root = policy.setdefault("Data_Management_Policy", {})
         root["enabled"] = True
+        if self.drop_in_transfers_file is not None:
+            root["drop_in_transfers_file"] = self.drop_in_transfers_file.name
+        else:
+            root.pop("drop_in_transfers_file", None)
 
         reactive = root.setdefault("reactive", {})
         reactive["enabled"] = bool(action["reactive.enabled"])

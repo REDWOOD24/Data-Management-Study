@@ -11,6 +11,10 @@ void POLICY::configurePolicy(const std::string& policy_file)
     file >> policy_content; // read the policy content into json_data
     file.close();
 
+    // Drop-in transfers are scheduled independently of the reactive/proactive
+    // configuration below: they never alter what the configured policy does.
+    configure_drop_in_transfers(policy_file);
+
     // check if the proactive policy is enabled
     if(policy_content["Data_Management_Policy"]["proactive"]["enabled"] != true){
         return;
@@ -193,6 +197,85 @@ CGSim::Policy* POLICY::hotset_replication_policy(float interval,
 CGSim::Policy* POLICY::custom_policy_agent_policy()
 {
     throw std::runtime_error("custom_policy_agent policy is not implemented");
+}
+
+void POLICY::configure_drop_in_transfers(const std::string& policy_file)
+{
+    const auto& root = policy_content["Data_Management_Policy"];
+    if (!root.contains("drop_in_transfers_file")) {
+        return;
+    }
+
+    std::string drop_in_path = root["drop_in_transfers_file"];
+    // Resolve relative paths against the directory of the policy config file.
+    const auto slash = policy_file.find_last_of('/');
+    if (!drop_in_path.empty() && drop_in_path.front() != '/' && slash != std::string::npos) {
+        drop_in_path = policy_file.substr(0, slash + 1) + drop_in_path;
+    }
+
+    std::ifstream file(drop_in_path);
+    if (!file.is_open()) {
+        std::cerr << "[drop-in] cannot open drop-in transfers file: " << drop_in_path << std::endl;
+        return;
+    }
+    json drop_in_content;
+    file >> drop_in_content;
+    file.close();
+
+    if (!drop_in_content.contains("drop_in_transfers")) {
+        std::cerr << "[drop-in] no 'drop_in_transfers' list in " << drop_in_path << std::endl;
+        return;
+    }
+
+    int index = 0;
+    for (const auto& entry : drop_in_content["drop_in_transfers"]) {
+        DropInTransfer transfer;
+        transfer.time     = entry.at("time").get<double>();
+        transfer.filename = entry.at("file").get<std::string>();
+        transfer.src_site = entry.at("source_site").get<std::string>();
+        transfer.dst_site = entry.at("destination_site").get<std::string>();
+        const std::string mode = entry.value("mode", "COPY");
+        transfer.mode = (mode == "MOVE") ? CGSim::FileTransferDecisionMode::MOVE
+                                         : CGSim::FileTransferDecisionMode::COPY;
+
+        auto* p = new CGSim::Policy();
+        p->start_time = transfer.time;
+        p->end_time = 0.0;
+        p->repeat_interval = 0.0; // one-shot: PolicyManager deactivates after firing
+        p->name = "Drop-In Transfer " + std::to_string(index)
+                + " (" + transfer.filename + ":" + transfer.src_site + "->" + transfer.dst_site + ")";
+
+        const std::string policy_name = p->name;
+        p->callback = [this, transfer, policy_name]() {
+            run_drop_in_transfer(transfer, policy_name);
+        };
+
+        CGSim::PolicyManager::addPolicy(p);
+        index++;
+    }
+
+    std::cout << "[drop-in] scheduled " << index << " drop-in transfer(s) from "
+              << drop_in_path << std::endl;
+}
+
+bool POLICY::run_drop_in_transfer(const DropInTransfer& transfer, const std::string& policy_name)
+{
+    const bool started = try_background_transfer(
+        transfer.filename,
+        transfer.src_site,
+        transfer.dst_site,
+        transfer.mode,
+        policy_name);
+
+    const double now = sg4::Engine::get_clock();
+    if (started) {
+        std::cout << "[drop-in] t=" << now << " started " << policy_name << std::endl;
+    } else {
+        // Ignore the request: the file may not be at the source site (or the
+        // destination already holds/awaits it) at this moment.
+        std::cout << "[drop-in] t=" << now << " skipped " << policy_name << std::endl;
+    }
+    return started;
 }
 
 void POLICY::run_storage_rebalance(
@@ -697,6 +780,12 @@ bool POLICY::try_background_transfer(
     }
 
     if (CGSim::get_file_manager()->is_in_flight(filename, src_site, dst_site)) {
+        return false;
+    }
+
+    // MOVE while a local-read pin holds the source replica: skip. COPY is allowed.
+    if (mode == CGSim::FileTransferDecisionMode::MOVE &&
+        CGSim::get_file_manager()->is_pinned(filename, src_site)) {
         return false;
     }
 

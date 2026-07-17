@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import queue
 import sys
 import threading
@@ -14,8 +15,11 @@ from typing import Any
 
 EXPLORE_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = EXPLORE_ROOT / "src"
+SCRIPTS_ROOT = Path(__file__).resolve().parent
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
+if str(SCRIPTS_ROOT) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_ROOT))
 
 from datamgmt_explore.agents.bandit import BanditAgent
 from datamgmt_explore.agents.bayesian_opt import BayesianOptAgent
@@ -34,10 +38,14 @@ from datamgmt_explore.run_store import RunStore
 from datamgmt_explore.settings import load_settings
 from datamgmt_explore.seeds import method_seed, method_seeds
 
+# Sibling script: reactive transfer delta reports at trial checkpoints.
+from report_reactive_transfer_deltas import maybe_run_checkpoint_report
+
 DEFAULT_AGENTS = ("bayesian_opt", "rl_policy", "random_search")
 DEFAULT_OBJECTIVE = "tail_bulk_staging_cost"
 DEFAULT_AGGREGATION = "mean"
 DEFAULT_SEED = 42
+DEFAULT_REACTIVE_DELTA_EVERY = 5
 SUPPORTED_AGENTS = ("bayesian_opt", "rl_policy", "bandit", "random_search")
 
 
@@ -225,6 +233,32 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Disable per-trial plots and method comparison plot",
     )
+    parser.add_argument(
+        "--reactive-delta-every",
+        type=int,
+        default=DEFAULT_REACTIVE_DELTA_EVERY,
+        help=(
+            "After every N completed trials per method (default: 10), write a "
+            "reactive-transfer delta report over the 3×N (or M×N) finished trials. "
+            "Set 0 to disable."
+        ),
+    )
+    parser.add_argument(
+        "--enable-drop-in-transfers",
+        action="store_true",
+        help=(
+            "Copy drop_in_transfers.json into each trial config and reference it "
+            "from data_policy_config.json."
+        ),
+    )
+    parser.add_argument(
+        "--drop-in-transfers-file",
+        default=None,
+        help=(
+            "Path to drop_in_transfers.json. Default: drop_in_transfers_file "
+            "from base_policy when --enable-drop-in-transfers is set."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -262,6 +296,29 @@ def default_experiment_name() -> str:
     return f"explore_{stamp}"
 
 
+def resolve_drop_in_transfers_file(args: argparse.Namespace, settings) -> None:
+    if not args.enable_drop_in_transfers:
+        return
+
+    if args.drop_in_transfers_file:
+        candidate = settings.resolve(args.drop_in_transfers_file)
+    else:
+        with settings.base_policy.open(encoding="utf-8") as handle:
+            base_policy = json.load(handle)
+        rel_path = (
+            base_policy.get("Data_Management_Policy", {}).get("drop_in_transfers_file")
+        )
+        if not rel_path:
+            raise SystemExit(
+                "Base policy has no drop_in_transfers_file; pass --drop-in-transfers-file."
+            )
+        candidate = (settings.base_policy.parent / str(rel_path)).resolve()
+
+    if not candidate.is_file():
+        raise SystemExit(f"Drop-in transfers file not found: {candidate}")
+    settings.drop_in_transfers_file = candidate
+
+
 def build_run_config(args: argparse.Namespace, settings, methods: list[str]) -> dict:
     seeds = method_seeds(args.seed, methods)
     return {
@@ -279,6 +336,13 @@ def build_run_config(args: argparse.Namespace, settings, methods: list[str]) -> 
         "dry_run": args.dry_run,
         "plot_enabled": not args.no_plot,
         "live_plot_enabled": not args.no_plot,
+        "reactive_delta_every": args.reactive_delta_every,
+        "drop_in_transfers_enabled": args.enable_drop_in_transfers,
+        "drop_in_transfers_file": (
+            str(settings.drop_in_transfers_file)
+            if settings.drop_in_transfers_file is not None
+            else None
+        ),
         "settings": str(args.settings),
         "cg_sim_bin": str(settings.cg_sim_bin),
     }
@@ -353,6 +417,11 @@ def drain_trial_updates(
     *,
     settings=None,
     plot_trials: bool = False,
+    experiment_dir: Path | None = None,
+    methods: list[str] | None = None,
+    reactive_delta_every: int = DEFAULT_REACTIVE_DELTA_EVERY,
+    reactive_delta_fired: set[int] | None = None,
+    dry_run: bool = False,
 ) -> int:
     drained = 0
     while True:
@@ -374,12 +443,28 @@ def drain_trial_updates(
                     update.trial_dir / "plots",
                     repo_root=settings.repo_root,
                 )
-        if plotter is None:
-            continue
-        point = plotter.load_point_from_trial(update.method, update.trial_dir)
-        if point is not None:
-            tracker.add(update.method, point.bars)
-            plotter.update(tracker)
+        if plotter is not None:
+            point = plotter.load_point_from_trial(update.method, update.trial_dir)
+            if point is not None:
+                tracker.add(update.method, point.bars)
+                plotter.update(tracker)
+
+        if (
+            not dry_run
+            and experiment_dir is not None
+            and methods is not None
+            and reactive_delta_fired is not None
+        ):
+            report_dir = maybe_run_checkpoint_report(
+                experiment_dir,
+                methods,
+                timing_tracker,
+                trial_index=update.trial_index,
+                every_n=reactive_delta_every,
+                fired_checkpoints=reactive_delta_fired,
+            )
+            if report_dir is not None:
+                print(f"Reactive transfer delta report: {report_dir}")
     return drained
 
 
@@ -387,6 +472,7 @@ def main() -> int:
     args = parse_args()
     methods = parse_agents(args)
     settings = load_settings(args.settings)
+    resolve_drop_in_transfers_file(args, settings)
     experiment_name = args.experiment_name or default_experiment_name()
     experiment_dir = settings.runs_dir / experiment_name
     methods_root = experiment_dir / "methods"
@@ -397,6 +483,8 @@ def main() -> int:
     seeds = run_config["method_seeds"]
     print(f"Experiment: {experiment_name}")
     print(f"Base seed: {args.seed}")
+    if settings.drop_in_transfers_file is not None:
+        print(f"Drop-in transfers: {settings.drop_in_transfers_file}")
     for method_name in methods:
         print(f"  {method_name}: seed {seeds[method_name]}")
 
@@ -439,6 +527,7 @@ def main() -> int:
         )
 
     method_outputs: list[dict[str, Any]] = []
+    reactive_delta_fired: set[int] = set()
 
     MethodProgressDisplay.start(methods, args.trials)
     try:
@@ -466,6 +555,11 @@ def main() -> int:
                     timing_csv,
                     settings=settings,
                     plot_trials=plot_trials,
+                    experiment_dir=experiment_dir,
+                    methods=methods,
+                    reactive_delta_every=args.reactive_delta_every,
+                    reactive_delta_fired=reactive_delta_fired,
+                    dry_run=args.dry_run,
                 )
                 for future in done:
                     agent_name = futures[future]
@@ -481,6 +575,11 @@ def main() -> int:
         timing_csv,
         settings=settings,
         plot_trials=plot_trials,
+        experiment_dir=experiment_dir,
+        methods=methods,
+        reactive_delta_every=args.reactive_delta_every,
+        reactive_delta_fired=reactive_delta_fired,
+        dry_run=args.dry_run,
     )
 
     if plotter is not None:

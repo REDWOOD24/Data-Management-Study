@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 import sqlite3
 from dataclasses import asdict, dataclass
@@ -9,11 +10,9 @@ import numpy as np
 
 P95_MAX_STAGING_TAIL_WEIGHT = 3.0
 
-# Tail/bulk split objective: mean staging of bottom 99% vs top 1% of jobs.
-STAGING_TAIL_FRACTION = 0.01
-# Calibrated from outlier-heavy runs: bottom-99% mean stays ~25s while top-1% mean
-# spans ~1e3s (good) to ~1.7e5s (842k/820k/75k-s jobs in the top decile). Heavy tail
-# weight keeps cost sensitive to fixing those outliers instead of the flat bulk term.
+# Tail/bulk split objective: mean staging of bottom 95% vs top 5% of jobs.
+STAGING_TAIL_FRACTION = 0.05
+# Heavy top weight keeps cost sensitive to fixing tail jobs instead of the flat bulk.
 TAIL_BULK_BOTTOM_WEIGHT = 0.05
 TAIL_BULK_TOP_WEIGHT = 0.95
 
@@ -78,6 +77,67 @@ def load_job_records(db_path: Path) -> list[JobRecord]:
                 )
             )
     return records
+
+
+def load_n_input_files_by_job_id(jobs_csv: Path) -> dict[str, int]:
+    """Map pandaid / job_id → ninputdatafiles from a workload jobs CSV."""
+    if not jobs_csv.is_file():
+        return {}
+
+    counts: dict[str, int] = {}
+    with jobs_csv.open(newline="", encoding="utf-8") as handle:
+        reader = csv.DictReader(handle)
+        for row in reader:
+            job_id = str(row.get("pandaid") or row.get("job_id") or "").strip()
+            if not job_id:
+                continue
+            raw = row.get("ninputdatafiles") or "0"
+            try:
+                counts[job_id] = int(raw)
+            except ValueError:
+                counts[job_id] = 0
+    return counts
+
+
+def filter_records_with_input_files(
+    records: list[JobRecord],
+    *,
+    jobs_csv: Path | None = None,
+    n_input_by_job: dict[str, int] | None = None,
+) -> list[JobRecord]:
+    """Keep only jobs that declare a non-zero input-file requirement.
+
+    Used for every objective so scoring ignores jobs that never need input data
+    (and therefore always have zero staging time).
+    """
+    counts = n_input_by_job
+    if counts is None:
+        if jobs_csv is None:
+            return list(records)
+        counts = load_n_input_files_by_job_id(jobs_csv)
+    if not counts:
+        return list(records)
+    return [record for record in records if counts.get(record.job_id, 0) > 0]
+
+
+def input_requiring_job_percentage(
+    *,
+    jobs_csv: Path | None = None,
+    n_input_by_job: dict[str, int] | None = None,
+) -> float | None:
+    """Percentage of workload jobs with ninputdatafiles > 0 (None if unknown)."""
+    counts = n_input_by_job
+    if counts is None:
+        if jobs_csv is None or not jobs_csv.is_file():
+            return None
+        counts = load_n_input_files_by_job_id(jobs_csv)
+    if not counts:
+        return None
+    total = len(counts)
+    if total == 0:
+        return None
+    with_input = sum(1 for value in counts.values() if value > 0)
+    return 100.0 * with_input / total
 
 
 def split_staging_by_tail_fraction(

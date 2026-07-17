@@ -10,7 +10,11 @@ import gymnasium as gym
 import numpy as np
 
 from datamgmt_explore.action_space import ActionDecoder, ActionSpace
-from datamgmt_explore.metrics import load_job_records, write_metrics
+from datamgmt_explore.metrics import (
+    filter_records_with_input_files,
+    load_job_records,
+    write_metrics,
+)
 from datamgmt_explore.objectives.base import ObjectiveResult, load_objective
 from datamgmt_explore.policy_builder import PolicyConfigBuilder
 from datamgmt_explore.plotting.trial_plots import plot_trial
@@ -67,6 +71,7 @@ class DataMgmtEnv(gym.Env):
         self.policy_builder = PolicyConfigBuilder(
             self.action_space_spec,
             base_policy_path=settings.base_policy,
+            drop_in_transfers_file=settings.drop_in_transfers_file,
         )
         self.runner = CgSimRunner(settings, self.policy_builder)
         self.objective_name = objective_name
@@ -158,6 +163,8 @@ class DataMgmtEnv(gym.Env):
         }
 
         records: list = []
+        objective_records: list = []
+        window_records: list = []
         objective_dict: dict[str, Any] | None = None
 
         has_events_db = not self.dry_run and sim_result.events_db_path.is_file()
@@ -172,6 +179,20 @@ class DataMgmtEnv(gym.Env):
             records = load_job_records(sim_result.events_db_path)
             write_metrics(trial_dir / "metrics.json", records)
 
+            jobs_csv = trial_dir / "jobs.csv"
+            if not jobs_csv.is_file():
+                jobs_csv = trial_dir / "jobs_truncated.csv"
+            if not jobs_csv.is_file():
+                jobs_csv = self.settings.resolve(self.settings.workload.jobs_file)
+            objective_records = filter_records_with_input_files(
+                records,
+                jobs_csv=jobs_csv if jobs_csv.is_file() else None,
+            )
+            info["all_job_count"] = len(records)
+            info["objective_job_count"] = len(objective_records)
+            if records:
+                info["input_requiring_job_fraction"] = len(objective_records) / len(records)
+
             if self.plot_enabled:
                 plot_paths = plot_trial(
                     sim_result.events_db_path,
@@ -180,7 +201,7 @@ class DataMgmtEnv(gym.Env):
                 )
                 info["plot_paths"] = [str(path) for path in plot_paths]
 
-            window_records = self.evaluator.select(records)
+            window_records = self.evaluator.select(objective_records)
             info["window_job_count"] = len(window_records)
 
             if window_records:
@@ -190,6 +211,10 @@ class DataMgmtEnv(gym.Env):
                     aggregation=self.aggregation,
                     reward_transform=self.reward_transform,
                 )
+                if objective_result.metadata is not None:
+                    objective_result.metadata["all_job_count"] = len(records)
+                    objective_result.metadata["objective_job_count"] = len(objective_records)
+                    objective_result.metadata["input_jobs_only"] = True
                 partial = not sim_result.success
                 if partial:
                     objective_result.metadata["partial"] = True
@@ -261,7 +286,7 @@ class DataMgmtEnv(gym.Env):
                     trial_index=trial_index,
                     sim_success=sim_result.success and not partial,
                     returncode=sim_result.returncode,
-                    records=records,
+                    records=objective_records,
                     objective_result=objective_dict,
                 )
             else:

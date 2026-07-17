@@ -1,0 +1,380 @@
+{
+  "description": "Hindsight just-in-time drop-in schedule from /Users/kaun-chiehhsu/Documents/projects/redwood/Data-Management-Study/explore/runs/explore_20260714T194729Z/methods/bayesian_opt/trial_0000 (2026-07-15T17:00:53Z). Critical jobs only (3): 4313041564, 2580215277, 3240653274. Schedules up to 80 MOVE transfers within 5400s of each job allocation (finish before 65000s bulk dispatch), with at most 3 concurrent in-flight drop-ins.",
+  "source": {
+    "events_db": "/Users/kaun-chiehhsu/Documents/projects/redwood/Data-Management-Study/explore/runs/explore_20260714T194729Z/methods/bayesian_opt/trial_0000/events.db",
+    "jobs_csv": "/Users/kaun-chiehhsu/Documents/projects/redwood/Data-Management-Study/explore/runs/explore_20260714T194729Z/methods/bayesian_opt/trial_0000/jobs.csv",
+    "min_staging_sec": 50000.0,
+    "top_n": null,
+    "job_ids": null,
+    "finish_buffer_sec": 300.0,
+    "link_gap_sec": 1.0,
+    "max_lead_sec": 5400.0,
+    "max_presence_sec": 5400.0,
+    "bulk_dispatch_cutoff_sec": 65000.0,
+    "placement_fraction": 1.0,
+    "max_simultaneous_starts": 1,
+    "max_concurrent_inflight": 3,
+    "max_total_transfers": 80,
+    "max_transfers_per_job": 30,
+    "time_bucket_sec": 300.0,
+    "mode": "MOVE",
+    "schedule_stats": {
+      "n_file_tasks": 80,
+      "n_scheduled": 43,
+      "late_transfers": 37,
+      "overflow_skipped": 27,
+      "inflight_skipped": 10,
+      "presence_skipped": 0,
+      "start_min_sec": 15524.0,
+      "start_max_sec": 63314.756,
+      "mean_lead_before_alloc_sec": 3113.888092839633,
+      "max_lead_before_alloc_sec": 5400.0,
+      "mean_presence_slack_sec": 2548.4866599890793,
+      "max_presence_slack_sec": 5142.323432841251,
+      "peak_starts_per_bucket": 1,
+      "peak_concurrent_inflight": 3,
+      "max_lead_sec": 5400.0,
+      "max_presence_sec": 5400.0,
+      "bulk_dispatch_cutoff_sec": 65000.0,
+      "placement_fraction": 1.0,
+      "max_simultaneous_starts": 1,
+      "max_concurrent_inflight": 3,
+      "time_bucket_sec": 300.0,
+      "mode": "MOVE",
+      "deprioritized_skipped": 59,
+      "max_total_transfers": 80,
+      "max_transfers_per_job": 30
+    },
+    "critical_jobs": [
+      {
+        "job_id": "4313041564",
+        "alloc_finish_time_sec": 64448.0,
+        "staging_time_sec": 842943.171791692,
+        "n_staging_files": 30
+      },
+      {
+        "job_id": "2580215277",
+        "alloc_finish_time_sec": 58392.0,
+        "staging_time_sec": 819770.9815175923,
+        "n_staging_files": 29
+      },
+      {
+        "job_id": "3240653274",
+        "alloc_finish_time_sec": 20924.0,
+        "staging_time_sec": 75251.70325369596,
+        "n_staging_files": 21
+      }
+    ],
+    "schedule_warnings": {
+      "late_transfers": 37,
+      "overflow_skipped": 27,
+      "inflight_skipped": 10,
+      "presence_skipped": 0,
+      "deprioritized_skipped": 59,
+      "late_examples": []
+    }
+  },
+  "drop_in_transfers": [
+    {
+      "time": 15524.0,
+      "file": "168",
+      "source_site": "AGLT2_site_0",
+      "destination_site": "AGLT2_site_4",
+      "mode": "MOVE"
+    },
+    {
+      "time": 15832.813,
+      "file": "2530",
+      "source_site": "AGLT2_site_0",
+      "destination_site": "AGLT2_site_4",
+      "mode": "MOVE"
+    },
+    {
+      "time": 16138.636,
+      "file": "2659",
+      "source_site": "AGLT2_site_0",
+      "destination_site": "AGLT2_site_4",
+      "mode": "MOVE"
+    },
+    {
+      "time": 16200.0,
+      "file": "7388",
+      "source_site": "AGLT2_site_1",
+      "destination_site": "AGLT2_site_4",
+      "mode": "MOVE"
+    },
+    {
+      "time": 16500.0,
+      "file": "5848",
+      "source_site": "AGLT2_site_11",
+      "destination_site": "AGLT2_site_4",
+      "mode": "MOVE"
+    },
+    {
+      "time": 16800.0,
+      "file": "127",
+      "source_site": "AGLT2_site_13",
+      "destination_site": "AGLT2_site_4",
+      "mode": "MOVE"
+    },
+    {
+      "time": 17100.0,
+      "file": "6867",
+      "source_site": "AGLT2_site_2",
+      "destination_site": "AGLT2_site_4",
+      "mode": "MOVE"
+    },
+    {
+      "time": 17400.0,
+      "file": "3344",
+      "source_site": "AGLT2_site_2",
+      "destination_site": "AGLT2_site_4",
+      "mode": "MOVE"
+    },
+    {
+      "time": 17700.0,
+      "file": "4378",
+      "source_site": "AGLT2_site_2",
+      "destination_site": "AGLT2_site_4",
+      "mode": "MOVE"
+    },
+    {
+      "time": 18000.0,
+      "file": "5824",
+      "source_site": "AGLT2_site_23",
+      "destination_site": "AGLT2_site_4",
+      "mode": "MOVE"
+    },
+    {
+      "time": 18300.0,
+      "file": "5175",
+      "source_site": "AGLT2_site_27",
+      "destination_site": "AGLT2_site_4",
+      "mode": "MOVE"
+    },
+    {
+      "time": 18863.668,
+      "file": "4704",
+      "source_site": "AGLT2_site_11",
+      "destination_site": "AGLT2_site_4",
+      "mode": "MOVE"
+    },
+    {
+      "time": 18900.0,
+      "file": "7252",
+      "source_site": "AGLT2_site_29",
+      "destination_site": "AGLT2_site_4",
+      "mode": "MOVE"
+    },
+    {
+      "time": 19200.0,
+      "file": "3693",
+      "source_site": "AGLT2_site_3",
+      "destination_site": "AGLT2_site_4",
+      "mode": "MOVE"
+    },
+    {
+      "time": 19500.0,
+      "file": "6746",
+      "source_site": "AGLT2_site_3",
+      "destination_site": "AGLT2_site_4",
+      "mode": "MOVE"
+    },
+    {
+      "time": 19800.0,
+      "file": "3761",
+      "source_site": "AGLT2_site_3",
+      "destination_site": "AGLT2_site_4",
+      "mode": "MOVE"
+    },
+    {
+      "time": 20100.0,
+      "file": "6820",
+      "source_site": "AGLT2_site_5",
+      "destination_site": "AGLT2_site_4",
+      "mode": "MOVE"
+    },
+    {
+      "time": 52992.0,
+      "file": "3992",
+      "source_site": "AGLT2_site_0",
+      "destination_site": "AGLT2_site_3",
+      "mode": "MOVE"
+    },
+    {
+      "time": 53100.0,
+      "file": "1441",
+      "source_site": "AGLT2_site_10",
+      "destination_site": "AGLT2_site_3",
+      "mode": "MOVE"
+    },
+    {
+      "time": 53630.959,
+      "file": "352",
+      "source_site": "AGLT2_site_0",
+      "destination_site": "AGLT2_site_3",
+      "mode": "MOVE"
+    },
+    {
+      "time": 53700.0,
+      "file": "1666",
+      "source_site": "AGLT2_site_11",
+      "destination_site": "AGLT2_site_3",
+      "mode": "MOVE"
+    },
+    {
+      "time": 54268.783,
+      "file": "2589",
+      "source_site": "AGLT2_site_0",
+      "destination_site": "AGLT2_site_3",
+      "mode": "MOVE"
+    },
+    {
+      "time": 54300.0,
+      "file": "7411",
+      "source_site": "AGLT2_site_18",
+      "destination_site": "AGLT2_site_3",
+      "mode": "MOVE"
+    },
+    {
+      "time": 54885.476,
+      "file": "602",
+      "source_site": "AGLT2_site_0",
+      "destination_site": "AGLT2_site_3",
+      "mode": "MOVE"
+    },
+    {
+      "time": 54900.0,
+      "file": "655",
+      "source_site": "AGLT2_site_19",
+      "destination_site": "AGLT2_site_3",
+      "mode": "MOVE"
+    },
+    {
+      "time": 55305.312,
+      "file": "6047",
+      "source_site": "AGLT2_site_0",
+      "destination_site": "AGLT2_site_3",
+      "mode": "MOVE"
+    },
+    {
+      "time": 55500.0,
+      "file": "2802",
+      "source_site": "AGLT2_site_2",
+      "destination_site": "AGLT2_site_3",
+      "mode": "MOVE"
+    },
+    {
+      "time": 55860.974,
+      "file": "4800",
+      "source_site": "AGLT2_site_2",
+      "destination_site": "AGLT2_site_3",
+      "mode": "MOVE"
+    },
+    {
+      "time": 56219.89,
+      "file": "3434",
+      "source_site": "AGLT2_site_2",
+      "destination_site": "AGLT2_site_3",
+      "mode": "MOVE"
+    },
+    {
+      "time": 56400.0,
+      "file": "3203",
+      "source_site": "AGLT2_site_20",
+      "destination_site": "AGLT2_site_3",
+      "mode": "MOVE"
+    },
+    {
+      "time": 56700.0,
+      "file": "796",
+      "source_site": "AGLT2_site_21",
+      "destination_site": "AGLT2_site_3",
+      "mode": "MOVE"
+    },
+    {
+      "time": 57000.0,
+      "file": "836",
+      "source_site": "AGLT2_site_23",
+      "destination_site": "AGLT2_site_3",
+      "mode": "MOVE"
+    },
+    {
+      "time": 57300.0,
+      "file": "6645",
+      "source_site": "AGLT2_site_23",
+      "destination_site": "AGLT2_site_3",
+      "mode": "MOVE"
+    },
+    {
+      "time": 57600.0,
+      "file": "6024",
+      "source_site": "AGLT2_site_23",
+      "destination_site": "AGLT2_site_3",
+      "mode": "MOVE"
+    },
+    {
+      "time": 57900.0,
+      "file": "3772",
+      "source_site": "AGLT2_site_25",
+      "destination_site": "AGLT2_site_3",
+      "mode": "MOVE"
+    },
+    {
+      "time": 59048.0,
+      "file": "4639",
+      "source_site": "AGLT2_site_0",
+      "destination_site": "AGLT2_site_1",
+      "mode": "MOVE"
+    },
+    {
+      "time": 59100.0,
+      "file": "5564",
+      "source_site": "AGLT2_site_2",
+      "destination_site": "AGLT2_site_1",
+      "mode": "MOVE"
+    },
+    {
+      "time": 60083.37,
+      "file": "5602",
+      "source_site": "AGLT2_site_2",
+      "destination_site": "AGLT2_site_1",
+      "mode": "MOVE"
+    },
+    {
+      "time": 61183.02,
+      "file": "2917",
+      "source_site": "AGLT2_site_0",
+      "destination_site": "AGLT2_site_1",
+      "mode": "MOVE"
+    },
+    {
+      "time": 61200.0,
+      "file": "2707",
+      "source_site": "AGLT2_site_2",
+      "destination_site": "AGLT2_site_1",
+      "mode": "MOVE"
+    },
+    {
+      "time": 62099.965,
+      "file": "3506",
+      "source_site": "AGLT2_site_2",
+      "destination_site": "AGLT2_site_1",
+      "mode": "MOVE"
+    },
+    {
+      "time": 62999.192,
+      "file": "4238",
+      "source_site": "AGLT2_site_2",
+      "destination_site": "AGLT2_site_1",
+      "mode": "MOVE"
+    },
+    {
+      "time": 63314.756,
+      "file": "1853",
+      "source_site": "AGLT2_site_0",
+      "destination_site": "AGLT2_site_1",
+      "mode": "MOVE"
+    }
+  ]
+}

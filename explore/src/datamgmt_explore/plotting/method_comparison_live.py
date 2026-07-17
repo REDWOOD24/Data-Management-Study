@@ -10,6 +10,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
+from datamgmt_explore.metrics import (
+    STAGING_TAIL_FRACTION,
+    TAIL_BULK_BOTTOM_WEIGHT,
+    TAIL_BULK_TOP_WEIGHT,
+)
 from datamgmt_explore.plotting.trial_comparison_plots import (
     TrialMeanBars,
     load_trial_mean_bars,
@@ -88,9 +93,72 @@ class LiveMethodComparisonPlot:
         self._fig: plt.Figure | None = None
         self._ax: plt.Axes | None = None
         self._ax2: plt.Axes | None = None
+        self._input_job_pct: float | None = None
+        self._input_job_counts: tuple[int, int] | None = None  # (with_input, total)
+        self._refresh_input_job_stats()
+
+    def _refresh_input_job_stats(self) -> None:
+        """Resolve input-job count/fraction from trial CSVs or the default workload."""
+        if self._input_job_pct is not None and self._input_job_counts is not None:
+            return
+
+        from datamgmt_explore.metrics import load_n_input_files_by_job_id
+
+        candidates: list[Path] = []
+        for method in self.methods:
+            method_dir = self.experiment_dir / "methods" / method
+            if not method_dir.is_dir():
+                continue
+            for trial_dir in sorted(method_dir.glob("trial_*")):
+                candidates.append(trial_dir / "jobs.csv")
+                candidates.append(trial_dir / "jobs_truncated.csv")
+        candidates.append(self.repo_root / "input" / "mimic_job.csv")
+
+        seen: set[Path] = set()
+        for jobs_csv in candidates:
+            try:
+                resolved = jobs_csv.resolve()
+            except OSError:
+                continue
+            if resolved in seen or not resolved.is_file():
+                continue
+            seen.add(resolved)
+            counts = load_n_input_files_by_job_id(resolved)
+            if not counts:
+                continue
+            total = len(counts)
+            with_input = sum(1 for value in counts.values() if value > 0)
+            self._input_job_counts = (with_input, total)
+            self._input_job_pct = 100.0 * with_input / total
+            return
 
     def _method_label(self, method: str) -> str:
         return METHOD_LABELS.get(method, method.replace("_", " ").title())
+
+    def _plot_title(self) -> str:
+        self._refresh_input_job_stats()
+        bulk_pct = int(round((1.0 - STAGING_TAIL_FRACTION) * 100))
+        tail_pct = int(round(STAGING_TAIL_FRACTION * 100))
+        split = f"{bulk_pct}/{tail_pct} split"
+        if self._input_job_counts is not None and self._input_job_pct is not None:
+            with_input, total = self._input_job_counts
+            return (
+                "Method comparison: mean transfer volume and staging cost "
+                f"({with_input}/{total} jobs with input files = {self._input_job_pct:.1f}%; {split})"
+            )
+        return (
+            "Method comparison: mean transfer volume and staging cost "
+            f"({split}; input-requiring jobs only)"
+        )
+
+    def _cost_ylabel(self) -> str:
+        bulk_pct = int(round((1.0 - STAGING_TAIL_FRACTION) * 100))
+        tail_pct = int(round(STAGING_TAIL_FRACTION * 100))
+        return (
+            f"Cost: {TAIL_BULK_BOTTOM_WEIGHT:g}·log1p(avg bottom {bulk_pct}%) + "
+            f"{TAIL_BULK_TOP_WEIGHT:g}·log1p(avg top {tail_pct}%) "
+            "(input jobs only; lower is better)"
+        )
 
     def load_point_from_trial(self, method: str, trial_dir: Path) -> MethodTrialPoint | None:
         trial_index = int(trial_dir.name.split("_", 1)[1])
@@ -185,7 +253,7 @@ class LiveMethodComparisonPlot:
         self._ax.set_ylabel("Mean transfer volume (GiB)", fontsize=FONT_SIZES["label"], labelpad=12)
         self._ax2.set_ylabel("")
         self._ax.set_title(
-            "Method comparison: mean transfer volume and staging cost (99/1 split)",
+            self._plot_title(),
             fontsize=FONT_SIZES["title"],
             pad=28,
         )
@@ -200,7 +268,7 @@ class LiveMethodComparisonPlot:
             self._ax2.set_ylim(0.0, 50.0)
         self._ax.grid(True, axis="y", alpha=0.3)
         self._ax2.set_ylabel(
-            "Cost: 0.05·log1p(avg bottom 99%) + 0.95·log1p(avg top 1%) (lower is better)",
+            self._cost_ylabel(),
             fontsize=FONT_SIZES["label"],
             labelpad=14,
         )

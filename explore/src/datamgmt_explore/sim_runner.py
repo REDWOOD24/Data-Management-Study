@@ -68,6 +68,10 @@ class CgSimRunner:
         policy_path = config_dir / "data_policy_config.json"
         self.policy_builder.write(action, policy_path)
 
+        drop_in_source = self.settings.drop_in_transfers_file
+        if drop_in_source is not None and drop_in_source.is_file():
+            shutil.copy2(drop_in_source, config_dir / drop_in_source.name)
+
         config_path = config_dir / "config.json"
         config_data = self._load_json(config_path)
         custom = config_data.setdefault("Custom_Parameters", {})

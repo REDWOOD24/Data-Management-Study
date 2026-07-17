@@ -7,6 +7,7 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 from datamgmt_explore.metrics import load_global_job_timing
+from datamgmt_explore.plotting.job_staging_time_plot import plot_trial_job_staging_times
 
 _TRANSFER_ANALYSIS = None
 
@@ -39,7 +40,7 @@ def plot_trial(
     min_bytes: float = 0.0,
     show_end_to_end: bool = False,
 ) -> list[Path]:
-    """Generate the same three plots as scripts/plot_transfer_analysis.py for one trial."""
+    """Generate trial plots: job staging times plus transfer analysis PNGs."""
     if not db_path.is_file():
         logger.warning("Skipping trial plots; events.db not found: %s", db_path)
         return []
@@ -51,16 +52,34 @@ def plot_trial(
             "matplotlib is required for plotting. Install with: pip install -r explore/requirements.txt"
         ) from exc
 
+    output_dir.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+
+    trial_index: int | None = None
+    parent_name = db_path.parent.name
+    if parent_name.startswith("trial_"):
+        try:
+            trial_index = int(parent_name.split("_", 1)[1])
+        except ValueError:
+            trial_index = None
+    staging_path = plot_trial_job_staging_times(
+        db_path,
+        output_dir,
+        trial_index=trial_index,
+    )
+    if staging_path is not None:
+        written.append(staging_path)
+
     try:
         transfers = pta.load_finished_transfers(db_path)
     except FileNotFoundError:
-        logger.warning("Skipping trial plots; database missing: %s", db_path)
-        return []
+        logger.warning("Skipping transfer trial plots; database missing: %s", db_path)
+        return written
 
     if not transfers:
-        logger.warning("Skipping trial plots; no finished transfer events in %s", db_path)
+        logger.warning("Skipping transfer trial plots; no finished transfer events in %s", db_path)
         _write_skip_note(output_dir, "No finished transfer events found in events.db")
-        return []
+        return written
 
     (
         sites,
@@ -76,7 +95,6 @@ def plot_trial(
     avg_end_to_end, avg_staging_time = pta.load_job_site_metrics(db_path)
     global_avg_staging_time, global_avg_end_to_end_time = load_global_job_timing(db_path)
 
-    output_dir.mkdir(parents=True, exist_ok=True)
     heatmap_path = output_dir / "transfer_heatmap.png"
     site_bars_path = output_dir / "site_ingress_egress.png"
     connections_path = output_dir / "top_connections.png"
@@ -108,7 +126,7 @@ def plot_trial(
         connections_path,
     )
 
-    written = [heatmap_path, site_bars_path, connections_path]
+    written.extend([heatmap_path, site_bars_path, connections_path])
     logger.info("Wrote trial plots to %s", output_dir)
     return written
 

@@ -16,4 +16,4 @@ objectives:
     class: TailBulkStagingCostObjective
     bottom_weight: 0.05
     top_weight: 0.95
-    tail_fraction: 0.01
+    tail_fraction: 0.05

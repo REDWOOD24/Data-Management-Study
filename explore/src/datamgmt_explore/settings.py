@@ -27,6 +27,7 @@ class Settings:
     failure_penalty: float = 1e6
     runs_dir: Path = field(default_factory=lambda: Path("runs"))
     explore_root: Path = field(default_factory=Path.cwd)
+    drop_in_transfers_file: Path | None = None
 
     def resolve(self, path: Path | str) -> Path:
         candidate = Path(path)

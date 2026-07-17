@@ -17,6 +17,16 @@ from datamgmt_explore.windowing import WindowContext
 class TailBulkStagingCostObjective:
     name = "tail_bulk_staging_cost"
 
+    def __init__(
+        self,
+        bottom_weight: float = TAIL_BULK_BOTTOM_WEIGHT,
+        top_weight: float = TAIL_BULK_TOP_WEIGHT,
+        tail_fraction: float = STAGING_TAIL_FRACTION,
+    ) -> None:
+        self.bottom_weight = float(bottom_weight)
+        self.top_weight = float(top_weight)
+        self.tail_fraction = float(tail_fraction)
+
     def compute(
         self,
         job_records: list[JobRecord],
@@ -24,17 +34,21 @@ class TailBulkStagingCostObjective:
         *,
         aggregation: str = "mean",
         reward_transform: str = "neg_log1p",
-        bottom_weight: float = TAIL_BULK_BOTTOM_WEIGHT,
-        top_weight: float = TAIL_BULK_TOP_WEIGHT,
-        tail_fraction: float = STAGING_TAIL_FRACTION,
+        bottom_weight: float | None = None,
+        top_weight: float | None = None,
+        tail_fraction: float | None = None,
     ) -> ObjectiveResult:
         del aggregation, reward_transform
 
+        bottom_w = self.bottom_weight if bottom_weight is None else float(bottom_weight)
+        top_w = self.top_weight if top_weight is None else float(top_weight)
+        tail_f = self.tail_fraction if tail_fraction is None else float(tail_fraction)
+
         avg_bottom, avg_top, cost = compute_tail_bulk_staging_cost(
             job_records,
-            bottom_weight=bottom_weight,
-            top_weight=top_weight,
-            tail_fraction=tail_fraction,
+            bottom_weight=bottom_w,
+            top_weight=top_w,
+            tail_fraction=tail_f,
         )
         per_job_values = [record.staging_time for record in job_records]
 
@@ -61,13 +75,13 @@ class TailBulkStagingCostObjective:
                 "window_end": window_ctx.window_end,
                 "avg_bottom_staging": avg_bottom,
                 "avg_top_staging": avg_top,
-                "bottom_weight": bottom_weight,
-                "top_weight": top_weight,
-                "tail_fraction": tail_fraction,
-                "bulk_fraction": 1.0 - tail_fraction,
+                "bottom_weight": bottom_w,
+                "top_weight": top_w,
+                "tail_fraction": tail_f,
+                "bulk_fraction": 1.0 - tail_f,
                 "reward_formula": (
-                    f"{bottom_weight}*log1p(mean(bottom {int((1-tail_fraction)*100)}%)) + "
-                    f"{top_weight}*log1p(mean(top {int(tail_fraction*100)}%))"
+                    f"{bottom_w}*log1p(mean(bottom {int((1 - tail_f) * 100)}%)) + "
+                    f"{top_w}*log1p(mean(top {int(tail_f * 100)}%))"
                 ),
                 "lower_is_better": True,
             },

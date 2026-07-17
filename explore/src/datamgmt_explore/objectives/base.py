@@ -58,7 +58,15 @@ def load_objective(name: str, objectives_config_path: str | None = None) -> Obje
         if spec:
             module = import_module(spec["module"])
             cls = getattr(module, spec["class"])
-            return cls()
+            init_kwargs = {
+                key: value
+                for key, value in spec.items()
+                if key not in {"module", "class", "aggregation"}
+            }
+            try:
+                return cls(**init_kwargs)
+            except TypeError:
+                return cls()
 
     if name in _REGISTRY:
         return _REGISTRY[name]()

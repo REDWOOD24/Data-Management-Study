@@ -26,6 +26,18 @@ public:
     /* A policy file is required. The returned policy_content is an optional json object. */
     void configurePolicy(const std::string& policy_file);
 
+    /* One-shot "drop-in" proactive transfers scheduled at explicit timestamps.
+       Loaded from a standalone config file referenced by
+       Data_Management_Policy.drop_in_transfers_file, independent of the
+       reactive/proactive policy configuration. */
+    struct DropInTransfer {
+        double time = 0.0;
+        std::string filename;
+        std::string src_site;
+        std::string dst_site;
+        CGSim::FileTransferDecisionMode mode = CGSim::FileTransferDecisionMode::COPY;
+    };
+
     /* Reactive transfer on demand. */
     void onFileRequest(Job* j, std::string filename, long long filesize, std::unordered_set<std::string> file_locations, std::string& source_site, CGSim::FileTransferDecisionMode& mode);
 
@@ -97,6 +109,14 @@ private:
         CGSim::FileTransferDecisionMode mode
     );
     CGSim::Policy* custom_policy_agent_policy();
+
+    /* Schedule the drop-in transfers listed in the standalone config file (if any). */
+    void configure_drop_in_transfers(const std::string& policy_file);
+
+    /* Execute a single drop-in transfer. Returns true when the background
+       transfer was started; false when it was skipped (e.g. the file is not
+       at the source site at this moment), in which case the request is ignored. */
+    bool run_drop_in_transfer(const DropInTransfer& transfer, const std::string& policy_name);
 
     void run_storage_rebalance(
         const std::string& policy_name,

@@ -7,7 +7,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from datamgmt_explore.metrics import (
+    STAGING_TAIL_FRACTION,
+    TAIL_BULK_BOTTOM_WEIGHT,
+    TAIL_BULK_TOP_WEIGHT,
     compute_tail_bulk_staging_cost,
+    filter_records_with_input_files,
     load_job_records,
     mean_staging_time_all_jobs,
 )
@@ -65,8 +69,20 @@ def load_trial_mean_bars(db_path: Path, trial_index: int, pta) -> TrialMeanBars 
         egress_proactive = float(np.mean(to_gib(egress_proactive_map))) if sites else 0.0
 
     records = load_job_records(db_path)
-    mean_staging = mean_staging_time_all_jobs(records)
-    _, _, staging_reward = compute_tail_bulk_staging_cost(records)
+    jobs_csv = db_path.parent / "jobs.csv"
+    if not jobs_csv.is_file():
+        jobs_csv = db_path.parent / "jobs_truncated.csv"
+    eval_records = filter_records_with_input_files(
+        records,
+        jobs_csv=jobs_csv if jobs_csv.is_file() else None,
+    )
+    mean_staging = mean_staging_time_all_jobs(eval_records)
+    _, _, staging_reward = compute_tail_bulk_staging_cost(
+        eval_records,
+        bottom_weight=TAIL_BULK_BOTTOM_WEIGHT,
+        top_weight=TAIL_BULK_TOP_WEIGHT,
+        tail_fraction=STAGING_TAIL_FRACTION,
+    )
 
     if not transfers and mean_staging is None:
         return None
