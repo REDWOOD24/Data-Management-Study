@@ -41,6 +41,11 @@ public:
     /* Reactive transfer on demand. */
     void onFileRequest(Job* j, std::string filename, long long filesize, std::unordered_set<std::string> file_locations, std::string& source_site, CGSim::FileTransferDecisionMode& mode);
 
+    /* Track allocated-but-not-started jobs for destination bias + prefetch. */
+    void note_job_allocated(Job* job);
+    void note_job_allocation_finished(Job* job);
+    void note_job_execution_start(Job* job);
+
 private:
     json policy_content;     // policy content
 
@@ -60,6 +65,12 @@ private:
     enum class CandidateDestinationPolicy {
         REQUESTING_SITES_FIRST,
         LEAST_UTILIZED_AMONG_REQUESTING
+    };
+
+    enum class SiteStagingBias {
+        OFF,
+        HIGH_STAGING_QUEUE,
+        HIGH_RECENT_STAGING
     };
 
     struct SiteUtil {
@@ -105,7 +116,15 @@ private:
         float prediction_horizon,
         int target_replica_count,
         CandidateDestinationPolicy candidate_destination_policy,
+        SiteStagingBias site_staging_bias,
         int max_transfers_per_tick,
+        CGSim::FileTransferDecisionMode mode
+    );
+    CGSim::Policy* job_input_prefetch_policy(
+        float interval,
+        int max_transfers_per_tick,
+        int max_jobs_per_tick,
+        SiteStagingBias site_staging_bias,
         CGSim::FileTransferDecisionMode mode
     );
     CGSim::Policy* custom_policy_agent_policy();
@@ -143,7 +162,17 @@ private:
         const std::string& policy_name,
         double hotness_threshold,
         int target_replica_count,
+        CandidateDestinationPolicy candidate_destination_policy,
+        SiteStagingBias site_staging_bias,
         int max_transfers_per_tick,
+        CGSim::FileTransferDecisionMode mode
+    );
+
+    void run_job_input_prefetch(
+        const std::string& policy_name,
+        int max_transfers_per_tick,
+        int max_jobs_per_tick,
+        SiteStagingBias site_staging_bias,
         CGSim::FileTransferDecisionMode mode
     );
 
@@ -188,9 +217,20 @@ private:
         const std::string& policy_name
     );
 
+    std::unordered_set<std::string> requesting_sites_for_file(const std::string& filename) const;
+    int staging_queue_count(const std::string& site) const;
+    double recent_staging_score(const std::string& site) const;
+    void sort_destinations_for_bias(
+        std::vector<SiteUtil>& destinations,
+        SiteStagingBias bias
+    ) const;
+    static SiteStagingBias parse_site_staging_bias(const json& proactive_node);
 
-private:
     std::mt19937 rng{1337};
+    std::unordered_map<long long, Job*> waiting_jobs_;
+    std::unordered_map<long long, double> alloc_finish_time_;
+    std::unordered_map<std::string, double> site_staging_ema_;
+    static constexpr double kStagingEmaAlpha = 0.3;
 };
 
 #endif

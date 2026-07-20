@@ -81,11 +81,13 @@ class LiveMethodComparisonPlot:
         *,
         repo_root: Path,
         max_trials: int | None = None,
+        objective_name: str = "avg_staging_time",
     ) -> None:
         self.experiment_dir = experiment_dir
         self.methods = methods
         self.repo_root = repo_root
         self.max_trials = max_trials
+        self.objective_name = objective_name
         self.output_dir = experiment_dir / "plots"
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.output_path = self.output_dir / "methods_comparison.png"
@@ -135,8 +137,27 @@ class LiveMethodComparisonPlot:
     def _method_label(self, method: str) -> str:
         return METHOD_LABELS.get(method, method.replace("_", " ").title())
 
+    def _metric_noun(self) -> str:
+        if self.objective_name == "avg_staging_time":
+            return "avg staging time"
+        return "staging cost"
+
     def _plot_title(self) -> str:
         self._refresh_input_job_stats()
+        metric = self._metric_noun()
+        if self.objective_name == "avg_staging_time":
+            if self._input_job_counts is not None and self._input_job_pct is not None:
+                with_input, total = self._input_job_counts
+                return (
+                    "Method comparison: mean transfer volume and "
+                    f"{metric} "
+                    f"({with_input}/{total} jobs with input files = {self._input_job_pct:.1f}%)"
+                )
+            return (
+                "Method comparison: mean transfer volume and "
+                f"{metric} (input-requiring jobs only)"
+            )
+
         bulk_pct = int(round((1.0 - STAGING_TAIL_FRACTION) * 100))
         tail_pct = int(round(STAGING_TAIL_FRACTION * 100))
         split = f"{bulk_pct}/{tail_pct} split"
@@ -152,6 +173,8 @@ class LiveMethodComparisonPlot:
         )
 
     def _cost_ylabel(self) -> str:
+        if self.objective_name == "avg_staging_time":
+            return "Avg staging time (s; input jobs only; lower is better)"
         bulk_pct = int(round((1.0 - STAGING_TAIL_FRACTION) * 100))
         tail_pct = int(round(STAGING_TAIL_FRACTION * 100))
         return (
@@ -160,9 +183,19 @@ class LiveMethodComparisonPlot:
             "(input jobs only; lower is better)"
         )
 
+    def _objective_legend_title(self) -> str:
+        if self.objective_name == "avg_staging_time":
+            return "Avg staging (method)"
+        return "Cost (method)"
+
     def load_point_from_trial(self, method: str, trial_dir: Path) -> MethodTrialPoint | None:
         trial_index = int(trial_dir.name.split("_", 1)[1])
-        bars = load_trial_mean_bars(trial_dir / "events.db", trial_index, self._pta)
+        bars = load_trial_mean_bars(
+            trial_dir / "events.db",
+            trial_index,
+            self._pta,
+            objective_name=self.objective_name,
+        )
         if bars is None:
             return None
         return MethodTrialPoint(method=method, trial_index=trial_index, bars=bars)
@@ -293,7 +326,7 @@ class LiveMethodComparisonPlot:
             method_legend = self._ax2.legend(
                 reward_handles,
                 reward_labels,
-                title="Cost (method)",
+                title=self._objective_legend_title(),
                 loc="lower center",
                 bbox_to_anchor=(0.78, 1.0),
                 ncol=min(len(reward_labels), 3),
@@ -317,7 +350,13 @@ class LiveMethodComparisonPlot:
             self._ax2 = None
 
 
-def build_tracker_from_experiment(experiment_dir: Path, methods: list[str], *, repo_root: Path) -> MethodComparisonTracker:
+def build_tracker_from_experiment(
+    experiment_dir: Path,
+    methods: list[str],
+    *,
+    repo_root: Path,
+    objective_name: str = "avg_staging_time",
+) -> MethodComparisonTracker:
     tracker = MethodComparisonTracker(methods=methods)
     pta = _load_transfer_analysis(repo_root)
     for method in methods:
@@ -326,7 +365,12 @@ def build_tracker_from_experiment(experiment_dir: Path, methods: list[str], *, r
             continue
         for trial_dir in sorted(method_dir.glob("trial_*")):
             trial_index = int(trial_dir.name.split("_", 1)[1])
-            bars = load_trial_mean_bars(trial_dir / "events.db", trial_index, pta)
+            bars = load_trial_mean_bars(
+                trial_dir / "events.db",
+                trial_index,
+                pta,
+                objective_name=objective_name,
+            )
             if bars is not None:
                 tracker.add(method, bars)
     return tracker
@@ -338,8 +382,14 @@ def plot_methods_comparison_static(
     *,
     repo_root: Path,
     max_trials: int | None = None,
+    objective_name: str = "avg_staging_time",
 ) -> Path | None:
-    tracker = build_tracker_from_experiment(experiment_dir, methods, repo_root=repo_root)
+    tracker = build_tracker_from_experiment(
+        experiment_dir,
+        methods,
+        repo_root=repo_root,
+        objective_name=objective_name,
+    )
     if not tracker.points:
         return None
     plotter = LiveMethodComparisonPlot(
@@ -347,6 +397,7 @@ def plot_methods_comparison_static(
         methods,
         repo_root=repo_root,
         max_trials=max_trials,
+        objective_name=objective_name,
     )
     output = plotter.update(tracker)
     plotter.close()

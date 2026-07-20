@@ -51,6 +51,16 @@ def load_methods(experiment_dir: Path) -> list[str]:
     return []
 
 
+def load_objective_name(experiment_dir: Path) -> str:
+    run_config_path = experiment_dir / "run_config.json"
+    if run_config_path.is_file():
+        run_config = json.loads(run_config_path.read_text(encoding="utf-8"))
+        objective = run_config.get("objective")
+        if isinstance(objective, str) and objective:
+            return objective
+    return "avg_staging_time"
+
+
 def method_dirs(experiment_dir: Path, methods: list[str]) -> list[Path]:
     methods_root = experiment_dir / "methods"
     if methods_root.is_dir():
@@ -98,6 +108,7 @@ def main() -> int:
             experiment_dir,
             methods,
             repo_root=settings.repo_root,
+            objective_name=load_objective_name(experiment_dir),
         )
         if comparison_path:
             print(f"Experiment plot: {comparison_path}")

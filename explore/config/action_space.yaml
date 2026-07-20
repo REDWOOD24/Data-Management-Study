@@ -10,6 +10,7 @@ proactive_template_names:
   - storage_rebalance
   - network_aware_rebalance
   - hotset_replication
+  - job_input_prefetch
 
 file_pick_names:
   - first_fit
@@ -21,6 +22,15 @@ path_metric_names:
   - estimated_transfer_time
   - link_load
   - bandwidth_only
+
+hotset_destination_policy_names:
+  - requesting_sites_first
+  - least_utilized_among_requesting
+
+site_staging_bias_names:
+  - "off"
+  - high_staging_queue
+  - high_recent_staging
 
 transfer_modes:
   - COPY
@@ -46,6 +56,11 @@ parameters:
     choices: [COPY, MOVE]
     default: MOVE
   proactive.transfer_template:
+    type: int
+    min: 0
+    max: 3
+    default: 0
+  proactive.site_staging_bias:
     type: int
     min: 0
     max: 2
@@ -117,6 +132,25 @@ parameters:
     max: 10
     default: 4
     template: hotset_replication
+  hotset_replication.candidate_destination_policy:
+    type: int
+    min: 0
+    max: 1
+    default: 0
+    template: hotset_replication
+
+  job_input_prefetch.max_transfers_per_tick:
+    type: int
+    min: 1
+    max: 8
+    default: 2
+    template: job_input_prefetch
+  job_input_prefetch.max_jobs_per_tick:
+    type: int
+    min: 1
+    max: 32
+    default: 8
+    template: job_input_prefetch
 
 constraints:
   - name: rebalance_threshold_order

@@ -23,12 +23,14 @@
       "interval": 500.0,
       "data_transfer_mode": "MOVE",
       "random_seed": 1337,
+      "site_staging_bias": [0, ["off", "high_staging_queue", "high_recent_staging"]],
       "transfer_template": [
         0,
         [
           "storage_rebalance",
           "network_aware_rebalance",
           "hotset_replication",
+          "job_input_prefetch",
           "custom_policy_agent"
         ]
       ],
@@ -55,6 +57,10 @@
           "target_replica_count": 4,
           "candidate_destination_policy": [0, ["requesting_sites_first", "least_utilized_among_requesting"]],
           "max_transfers_per_tick": 1
+        },
+        "job_input_prefetch": {
+          "max_transfers_per_tick": 2,
+          "max_jobs_per_tick": 8
         },
         "custom_policy_agent": {
           "policy_id": "my_agent_v1",

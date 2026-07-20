@@ -24,6 +24,8 @@ void POLICY::configurePolicy(const std::string& policy_file)
     float interval          = policy_content["Data_Management_Policy"]["proactive"]["interval"];
     // 0 as COPY, 1 as MOVE, TODO: may need to add error handling for invalid data transfer mode
     bool data_transfer_mode = (policy_content["Data_Management_Policy"]["proactive"]["data_transfer_mode"] == "COPY")?false:true;
+    SiteStagingBias site_staging_bias = parse_site_staging_bias(
+        policy_content["Data_Management_Policy"]["proactive"]);
 
     int template_index = int(policy_content["Data_Management_Policy"]["proactive"]["transfer_template"][0]);
 
@@ -81,10 +83,24 @@ void POLICY::configurePolicy(const std::string& policy_file)
                                                                     prediction_horizon,
                                                                     target_replica_count,
                                                                     candidate_destination_policy,
+                                                                    site_staging_bias,
                                                                     max_transfers_per_tick,
                                                                     mode));
     }
     else if(template_index == 3){
+        const auto& prefetch =
+            policy_content["Data_Management_Policy"]["proactive"]["template_params"]["job_input_prefetch"];
+        int max_transfers_per_tick = prefetch.value("max_transfers_per_tick", 2);
+        int max_jobs_per_tick = prefetch.value("max_jobs_per_tick", 8);
+        CGSim::FileTransferDecisionMode mode = (data_transfer_mode)?CGSim::FileTransferDecisionMode::MOVE:CGSim::FileTransferDecisionMode::COPY;
+        CGSim::PolicyManager::addPolicy(job_input_prefetch_policy(
+            interval,
+            max_transfers_per_tick,
+            max_jobs_per_tick,
+            site_staging_bias,
+            mode));
+    }
+    else if(template_index == 4){
         CGSim::PolicyManager::addPolicy(custom_policy_agent_policy());
     }
     else{
@@ -168,6 +184,7 @@ CGSim::Policy* POLICY::hotset_replication_policy(float interval,
                                                 float prediction_horizon,
                                                 int target_replica_count,
                                                 CandidateDestinationPolicy candidate_destination_policy,
+                                                SiteStagingBias site_staging_bias,
                                                 int max_transfers_per_tick,
                                                 CGSim::FileTransferDecisionMode mode)
 {
@@ -179,14 +196,49 @@ CGSim::Policy* POLICY::hotset_replication_policy(float interval,
     p->name = "Hotset Replication Policy";
 
     const std::string policy_name = p->name;
+    (void)hotness_window;
+    (void)prediction_horizon;
 
     p->callback = [this, policy_name, hotness_threshold, target_replica_count,
+                   candidate_destination_policy, site_staging_bias,
                    max_transfers_per_tick, mode]() {
         run_hotset_replication(
             policy_name,
             hotness_threshold,
             target_replica_count,
+            candidate_destination_policy,
+            site_staging_bias,
             max_transfers_per_tick,
+            mode
+        );
+    };
+
+    return p;
+}
+
+CGSim::Policy* POLICY::job_input_prefetch_policy(
+    float interval,
+    int max_transfers_per_tick,
+    int max_jobs_per_tick,
+    SiteStagingBias site_staging_bias,
+    CGSim::FileTransferDecisionMode mode)
+{
+    auto* p = new CGSim::Policy();
+
+    p->start_time = 0.0;
+    p->end_time = 0.0;
+    p->repeat_interval = interval;
+    p->name = "Job Input Prefetch Policy";
+
+    const std::string policy_name = p->name;
+
+    p->callback = [this, policy_name, max_transfers_per_tick, max_jobs_per_tick,
+                   site_staging_bias, mode]() {
+        run_job_input_prefetch(
+            policy_name,
+            max_transfers_per_tick,
+            max_jobs_per_tick,
+            site_staging_bias,
             mode
         );
     };
@@ -479,6 +531,8 @@ void POLICY::run_hotset_replication(
     const std::string& policy_name,
     double hotness_threshold,
     int target_replica_count,
+    CandidateDestinationPolicy candidate_destination_policy,
+    SiteStagingBias site_staging_bias,
     int max_transfers_per_tick,
     CGSim::FileTransferDecisionMode mode)
 {
@@ -557,19 +611,61 @@ void POLICY::run_hotset_replication(
                       return util_by_site[a].util > util_by_site[b].util;
                   });
 
-        std::vector<SiteUtil> dst_candidates;
+        auto requesting = requesting_sites_for_file(hot.filename);
+
+        std::vector<SiteUtil> dst_all;
+        std::vector<SiteUtil> dst_requesting;
         for (const auto& u : utils) {
-            if (hot.replicas.find(u.site) == hot.replicas.end() &&
-                !site_has_file(u.site, hot.filename) &&
-                u.remaining >= filesize) {
-                dst_candidates.push_back(u);
+            if (hot.replicas.find(u.site) != hot.replicas.end() ||
+                site_has_file(u.site, hot.filename) ||
+                u.remaining < filesize) {
+                continue;
+            }
+            dst_all.push_back(u);
+            if (requesting.count(u.site)) {
+                dst_requesting.push_back(u);
             }
         }
 
-        std::sort(dst_candidates.begin(), dst_candidates.end(),
-                  [](const SiteUtil& a, const SiteUtil& b) {
-                      return a.util < b.util;
-                  });
+        std::vector<SiteUtil> dst_candidates;
+        if (candidate_destination_policy ==
+            CandidateDestinationPolicy::LEAST_UTILIZED_AMONG_REQUESTING) {
+            dst_candidates = dst_requesting.empty() ? dst_all : dst_requesting;
+            if (site_staging_bias == SiteStagingBias::OFF) {
+                std::sort(dst_candidates.begin(), dst_candidates.end(),
+                          [](const SiteUtil& a, const SiteUtil& b) {
+                              return a.util < b.util;
+                          });
+            } else {
+                sort_destinations_for_bias(dst_candidates, site_staging_bias);
+            }
+        } else {
+            // REQUESTING_SITES_FIRST: try requesting destinations before others.
+            auto requesting_sorted = dst_requesting;
+            auto other_sorted = dst_all;
+            other_sorted.erase(
+                std::remove_if(
+                    other_sorted.begin(),
+                    other_sorted.end(),
+                    [&requesting](const SiteUtil& u) {
+                        return requesting.count(u.site) > 0;
+                    }),
+                other_sorted.end());
+
+            if (site_staging_bias == SiteStagingBias::OFF) {
+                auto by_util = [](const SiteUtil& a, const SiteUtil& b) {
+                    return a.util < b.util;
+                };
+                std::sort(requesting_sorted.begin(), requesting_sorted.end(), by_util);
+                std::sort(other_sorted.begin(), other_sorted.end(), by_util);
+            } else {
+                sort_destinations_for_bias(requesting_sorted, site_staging_bias);
+                sort_destinations_for_bias(other_sorted, site_staging_bias);
+            }
+            dst_candidates = std::move(requesting_sorted);
+            dst_candidates.insert(
+                dst_candidates.end(), other_sorted.begin(), other_sorted.end());
+        }
 
         for (const auto& src_site : src_candidates) {
             for (const auto& dst : dst_candidates) {
@@ -586,6 +682,256 @@ void POLICY::run_hotset_replication(
             }
         }
     }
+}
+
+void POLICY::run_job_input_prefetch(
+    const std::string& policy_name,
+    int max_transfers_per_tick,
+    int max_jobs_per_tick,
+    SiteStagingBias site_staging_bias,
+    CGSim::FileTransferDecisionMode mode)
+{
+    if (waiting_jobs_.empty() || max_transfers_per_tick <= 0 || max_jobs_per_tick <= 0) {
+        return;
+    }
+
+    struct JobPrefetchCandidate {
+        Job* job = nullptr;
+        int missing_inputs = 0;
+        double priority = 0.0;
+    };
+
+    std::vector<JobPrefetchCandidate> candidates;
+    candidates.reserve(waiting_jobs_.size());
+
+    for (const auto& [job_id, job] : waiting_jobs_) {
+        (void)job_id;
+        if (job == nullptr || job->comp_site.empty() || job->input_files.empty()) {
+            continue;
+        }
+
+        int missing = 0;
+        for (const auto& filename : job->input_files) {
+            if (!site_has_file(job->comp_site, filename) &&
+                !is_file_in_flight_to_site(filename, job->comp_site)) {
+                missing++;
+            }
+        }
+        if (missing == 0) {
+            continue;
+        }
+
+        double priority = static_cast<double>(missing);
+        if (site_staging_bias == SiteStagingBias::HIGH_STAGING_QUEUE) {
+            priority += 10.0 * static_cast<double>(staging_queue_count(job->comp_site));
+        } else if (site_staging_bias == SiteStagingBias::HIGH_RECENT_STAGING) {
+            priority += recent_staging_score(job->comp_site);
+        }
+
+        candidates.push_back({job, missing, priority});
+    }
+
+    std::sort(candidates.begin(), candidates.end(),
+              [](const JobPrefetchCandidate& a, const JobPrefetchCandidate& b) {
+                  if (a.priority != b.priority) {
+                      return a.priority > b.priority;
+                  }
+                  return a.missing_inputs > b.missing_inputs;
+              });
+
+    if (static_cast<int>(candidates.size()) > max_jobs_per_tick) {
+        candidates.resize(static_cast<std::size_t>(max_jobs_per_tick));
+    }
+
+    auto utils = get_site_utils();
+    std::unordered_map<std::string, SiteUtil> util_by_site;
+    for (const auto& u : utils) {
+        util_by_site[u.site] = u;
+    }
+
+    int transfers_started = 0;
+    for (const auto& cand : candidates) {
+        Job* job = cand.job;
+        for (const auto& filename : job->input_files) {
+            if (site_has_file(job->comp_site, filename) ||
+                is_file_in_flight_to_site(filename, job->comp_site)) {
+                continue;
+            }
+
+            auto locations = CGSim::get_file_manager()->request_file_sites(filename);
+            if (locations.empty()) {
+                continue;
+            }
+
+            std::vector<std::string> src_candidates;
+            for (const auto& site : locations) {
+                if (site != job->comp_site && site_has_file(site, filename)) {
+                    src_candidates.push_back(site);
+                }
+            }
+            if (src_candidates.empty()) {
+                continue;
+            }
+
+            std::sort(src_candidates.begin(), src_candidates.end(),
+                      [&util_by_site](const std::string& a, const std::string& b) {
+                          return util_by_site[a].util > util_by_site[b].util;
+                      });
+
+            for (const auto& src_site : src_candidates) {
+                if (try_background_transfer(
+                        filename, src_site, job->comp_site, mode, policy_name)) {
+                    transfers_started++;
+                    if (transfers_started >= max_transfers_per_tick) {
+                        return;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+}
+
+void POLICY::note_job_allocated(Job* job)
+{
+    if (job == nullptr || job->comp_site.empty()) {
+        return;
+    }
+    waiting_jobs_[job->jobid] = job;
+}
+
+void POLICY::note_job_allocation_finished(Job* job)
+{
+    if (job == nullptr) {
+        return;
+    }
+    waiting_jobs_[job->jobid] = job;
+    alloc_finish_time_[job->jobid] = sg4::Engine::get_clock();
+}
+
+void POLICY::note_job_execution_start(Job* job)
+{
+    if (job == nullptr) {
+        return;
+    }
+
+    const auto alloc_it = alloc_finish_time_.find(job->jobid);
+    if (alloc_it != alloc_finish_time_.end() && !job->comp_site.empty()) {
+        const double staging = std::max(0.0, sg4::Engine::get_clock() - alloc_it->second);
+        auto& ema = site_staging_ema_[job->comp_site];
+        if (ema <= 0.0) {
+            ema = staging;
+        } else {
+            ema = kStagingEmaAlpha * staging + (1.0 - kStagingEmaAlpha) * ema;
+        }
+        alloc_finish_time_.erase(alloc_it);
+    }
+
+    waiting_jobs_.erase(job->jobid);
+}
+
+std::unordered_set<std::string> POLICY::requesting_sites_for_file(
+    const std::string& filename) const
+{
+    std::unordered_set<std::string> sites;
+    for (const auto& [job_id, job] : waiting_jobs_) {
+        (void)job_id;
+        if (job == nullptr || job->comp_site.empty()) {
+            continue;
+        }
+        if (job->input_files.count(filename) &&
+            !site_has_file(job->comp_site, filename)) {
+            sites.insert(job->comp_site);
+        }
+    }
+    return sites;
+}
+
+int POLICY::staging_queue_count(const std::string& site) const
+{
+    int count = 0;
+    for (const auto& [job_id, job] : waiting_jobs_) {
+        (void)job_id;
+        if (job != nullptr && job->comp_site == site) {
+            count++;
+        }
+    }
+    return count;
+}
+
+double POLICY::recent_staging_score(const std::string& site) const
+{
+    const auto it = site_staging_ema_.find(site);
+    if (it == site_staging_ema_.end()) {
+        return 0.0;
+    }
+    return it->second;
+}
+
+void POLICY::sort_destinations_for_bias(
+    std::vector<SiteUtil>& destinations,
+    SiteStagingBias bias) const
+{
+    if (bias == SiteStagingBias::HIGH_STAGING_QUEUE) {
+        std::sort(destinations.begin(), destinations.end(),
+                  [this](const SiteUtil& a, const SiteUtil& b) {
+                      const int qa = staging_queue_count(a.site);
+                      const int qb = staging_queue_count(b.site);
+                      if (qa != qb) {
+                          return qa > qb;
+                      }
+                      return a.util < b.util;
+                  });
+        return;
+    }
+
+    if (bias == SiteStagingBias::HIGH_RECENT_STAGING) {
+        std::sort(destinations.begin(), destinations.end(),
+                  [this](const SiteUtil& a, const SiteUtil& b) {
+                      const double sa = recent_staging_score(a.site);
+                      const double sb = recent_staging_score(b.site);
+                      if (sa != sb) {
+                          return sa > sb;
+                      }
+                      return a.util < b.util;
+                  });
+        return;
+    }
+
+    std::sort(destinations.begin(), destinations.end(),
+              [](const SiteUtil& a, const SiteUtil& b) {
+                  return a.util < b.util;
+              });
+}
+
+POLICY::SiteStagingBias POLICY::parse_site_staging_bias(const json& proactive_node)
+{
+    if (!proactive_node.contains("site_staging_bias")) {
+        return SiteStagingBias::OFF;
+    }
+    const auto& bias = proactive_node["site_staging_bias"];
+    int index = 0;
+    if (bias.is_array() && !bias.empty()) {
+        index = int(bias[0]);
+    } else if (bias.is_number_integer()) {
+        index = int(bias);
+    } else if (bias.is_string()) {
+        const std::string name = bias.get<std::string>();
+        if (name == "high_staging_queue") {
+            return SiteStagingBias::HIGH_STAGING_QUEUE;
+        }
+        if (name == "high_recent_staging") {
+            return SiteStagingBias::HIGH_RECENT_STAGING;
+        }
+        return SiteStagingBias::OFF;
+    }
+    if (index == 1) {
+        return SiteStagingBias::HIGH_STAGING_QUEUE;
+    }
+    if (index == 2) {
+        return SiteStagingBias::HIGH_RECENT_STAGING;
+    }
+    return SiteStagingBias::OFF;
 }
 
 std::vector<POLICY::SiteUtil> POLICY::get_site_utils() const

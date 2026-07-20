@@ -42,9 +42,21 @@ class BanditAgent(BaseAgent):
     def _initialize_arms(self) -> None:
         space = self.env.action_space_spec
         reactive_count = len(space.reactive_source_names)
-        proactive_count = len(space.proactive_template_names)
+        tmpl_param = next(
+            (param for param in space.parameters if param.name == "proactive.transfer_template"),
+            None,
+        )
+        if (
+            tmpl_param is not None
+            and tmpl_param.minimum is not None
+            and tmpl_param.maximum is not None
+        ):
+            proactive_indices = range(int(tmpl_param.minimum), int(tmpl_param.maximum) + 1)
+        else:
+            proactive_indices = range(len(space.proactive_template_names))
+
         for reactive in range(reactive_count):
-            for proactive in range(proactive_count):
+            for proactive in proactive_indices:
                 key = f"r{reactive}_p{proactive}"
                 self.arms[key] = BanditArm(key=key)
 

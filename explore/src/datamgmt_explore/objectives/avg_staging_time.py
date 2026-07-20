@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Any
-
 import numpy as np
 
 from datamgmt_explore.metrics import JobRecord
@@ -38,6 +36,8 @@ def aggregate_staging(
 
 @register_objective("avg_staging_time")
 class AvgStagingTimeObjective:
+    """Mean staging time over evaluated jobs. Lower is better."""
+
     name = "avg_staging_time"
 
     def compute(
@@ -46,13 +46,13 @@ class AvgStagingTimeObjective:
         window_ctx: WindowContext,
         *,
         aggregation: str = "mean",
-        reward_transform: str = "neg_log1p",
+        reward_transform: str = "identity",
     ) -> ObjectiveResult:
         value, per_site, per_job_values = aggregate_staging(job_records, aggregation)
 
+        # Agents minimize reward; keep reward on the same scale as the mean staging time.
         if window_ctx.config.mode == WindowMode.PER_JOB and per_job_values:
-            rewards = [-float(np.log1p(max(v, 0.0))) for v in per_job_values]
-            reward = float(np.mean(rewards))
+            reward = float(np.mean(per_job_values))
         else:
             reward = self._to_reward(value, reward_transform)
 
@@ -70,13 +70,18 @@ class AvgStagingTimeObjective:
                 "window_start": window_ctx.window_start,
                 "window_end": window_ctx.window_end,
                 "reward_transform": reward_transform,
+                "lower_is_better": True,
             },
         )
 
     @staticmethod
     def _to_reward(value: float, reward_transform: str) -> float:
         if np.isnan(value):
-            return float("-inf")
+            return float("inf")
+        if reward_transform in ("identity", "none", ""):
+            return float(value)
+        if reward_transform == "log1p":
+            return float(np.log1p(max(value, 0.0)))
         if reward_transform == "neg_log1p":
             return -float(np.log1p(max(value, 0.0)))
         if reward_transform == "neg":

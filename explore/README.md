@@ -16,7 +16,7 @@ This package does **not** modify the C++ plugin. It generates per-trial
 | **`bayesian_opt`** | Default | Optuna TPE black-box optimization; learns from prior trials |
 | **`rl_policy`** | Default | PyTorch REINFORCE policy with structured post-episode observation context (~51-dim) |
 | **`random_search`** | Default | Memoryless uniform baseline for comparison |
-| `bandit` | Supported | UCB1 over reactive/proactive template pairs (12 arms) |
+| `bandit` | Supported | UCB1 over reactive/proactive template pairs (16 arms: 4×4) |
 
 **Entry point:** [`scripts/run_exploration.py`](scripts/run_exploration.py) — defaults to
 `bayesian_opt`, `rl_policy`, and `random_search` running in parallel (one thread per method).
@@ -218,8 +218,9 @@ python explore/scripts/run_exploration.py \
   --experiment-name bandit_templates
 ```
 
-**Why:** The bandit pre-registers all 12 template arms and runs UCB1 over them.
-It does **not** fine-tune continuous thresholds — use `bayesian_opt` for that.
+**Why:** The bandit pre-registers all 16 template arms (4 reactive × 4 proactive)
+and runs UCB1 over them. It does **not** fine-tune continuous thresholds — use
+`bayesian_opt` for that.
 
 ---
 
@@ -309,27 +310,98 @@ and writes `failure_report.json` with parsed SimGrid errors. Common patterns:
 ## Action Space
 
 Actions map to fields in [`config/data_policy_config.json`](../config/data_policy_config.json).
-Only **implemented** plugin parameters are exposed (see `plugin/src/policy.cpp`).
+The searchable surface is declared in [`config/action_space.yaml`](config/action_space.yaml)
+and applied by [`policy_builder.py`](src/datamgmt_explore/policy_builder.py).
+Only **implemented** plugin parameters are exposed (see `plugin/src/policy.cpp`
+and the main [Data Management Policies](../README.md#data-management-policies) section).
 
-Reactive and proactive transfers are **always enabled**; explorers tune templates, thresholds, and modes only.
+Reactive and proactive transfers are **always enabled** in exploration (masked on).
+Explorers tune templates, thresholds, modes, destination policy, and staging bias.
+Several intensity knobs remain fixed outside the action space today:
+
+| Fixed knob | Value | Notes |
+|------------|-------|-------|
+| `proactive.interval` | **500 s** | Proactive tick period |
+| `max_transfers_per_tick` (storage / network / hotset) | **1** | Per-tick background transfer cap |
+| `hotset_replication.hotness_window` / `prediction_horizon` | **100** / **50** | Hardcoded defaults in the policy builder |
+
+Inactive template-scoped parameters are reset to defaults each trial (action-space
+masking), so only the active proactive template’s knobs affect the simulation.
 
 ### Reactive transfer
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `reactive.prefer_local_replica` | bool | Use local replica when available |
-| `reactive.remote_source_template` | int 0–3 | Source selection strategy |
-| `reactive.random_seed` | int | Seed for random_replica selection |
+| Parameter | Type | Range / choices | Description |
+|-----------|------|-----------------|-------------|
+| `reactive.prefer_local_replica` | bool | T/F | Prefer a resting local replica when present |
+| `reactive.remote_source_template` | int | `0–3` | Remote source strategy when multiple replicas exist: `first_replica`, `least_utilized_source`, `most_utilized_source`, `random_replica` |
+| `reactive.random_seed` | int | `0–999999` | Seed for `random_replica` |
 
-### Proactive transfer
+### Proactive transfer (global)
 
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `proactive.interval` | fixed | **500 s** (not tunable) |
-| `proactive.data_transfer_mode` | enum | `COPY` or `MOVE` |
-| `proactive.transfer_template` | int 0–2 | Active proactive template |
-| `proactive.max_transfers_per_tick` | fixed | **1** per tick (not tunable) |
-| Template params | varies | Thresholds, file_pick mode, etc. |
+| Parameter | Type | Range / choices | Description |
+|-----------|------|-----------------|-------------|
+| `proactive.data_transfer_mode` | enum | `COPY`, `MOVE` | Background transfer mode for the active template |
+| `proactive.transfer_template` | int | `0–3` | Active template: `0` storage_rebalance, `1` network_aware_rebalance, `2` hotset_replication, `3` job_input_prefetch |
+| `proactive.site_staging_bias` | int | `0–2` | Destination/job ranking bias: `0` off, `1` high_staging_queue, `2` high_recent_staging (used by hotset + job-input prefetch) |
+
+### Template `0` — storage_rebalance
+
+Moves/copies files from high- to low-utilization sites.
+
+| Parameter | Type | Range | Default | Description |
+|-----------|------|-------|---------|-------------|
+| `storage_rebalance.high_utilization_threshold` | float | `0.10–0.50` | `0.2` | Source-side util threshold |
+| `storage_rebalance.low_utilization_threshold` | float | `0.55–0.95` | `0.8` | Destination-side util threshold |
+| `storage_rebalance.file_pick` | int | `0–3` | `0` | `first_fit` / `largest_fit` / `smallest_fit` / `random_fit` |
+| `storage_rebalance.skip_if_already_replica_on_destination` | bool | T/F | `true` | Skip files already present at destination |
+
+Constraints: high &lt; low, and low − high ≥ `0.25`.
+
+### Template `1` — network_aware_rebalance
+
+Rebalance with path-aware filtering/ranking.
+
+| Parameter | Type | Range | Default | Description |
+|-----------|------|-------|---------|-------------|
+| `network_aware_rebalance.high_utilization_threshold` | float | `0.05–0.40` | `0.05` | Source util threshold |
+| `network_aware_rebalance.low_utilization_threshold` | float | `0.60–1.0` | `1.0` | Destination util threshold |
+| `network_aware_rebalance.path_metric` | int | `0–2` | `0` | `estimated_transfer_time` / `link_load` / `bandwidth_only` |
+| `network_aware_rebalance.max_path_load` | float | `0.1–1.0` | `1.0` | Maximum acceptable path load |
+| `network_aware_rebalance.file_pick` | int | `0–3` | `0` | Same file-pick modes as storage rebalance |
+
+Constraints: high &lt; low, and low − high ≥ `0.25`.
+
+### Template `2` — hotset_replication
+
+Replicate files above a prevalence/hotness threshold toward a target replica count.
+
+| Parameter | Type | Range | Default | Description |
+|-----------|------|-------|---------|-------------|
+| `hotset_replication.hotness_threshold` | float | `0.01–0.5` | `0.08` | Minimum replica prevalence to treat a file as hot |
+| `hotset_replication.target_replica_count` | int | `2–10` | `4` | Stop replicating a file once this many replicas exist |
+| `hotset_replication.candidate_destination_policy` | int | `0–1` | `0` | `0` = `requesting_sites_first` (sites with waiting jobs that need the file, then others); `1` = `least_utilized_among_requesting` (requesting sites only when available) |
+
+Destination ordering also respects `proactive.site_staging_bias` when that bias is not `off`.
+
+### Template `3` — job_input_prefetch
+
+Prefetch missing inputs for allocated-but-not-started jobs to their compute sites
+(online analogue of drop-in prestaging, driven by the live waiting-job set).
+
+| Parameter | Type | Range | Default | Description |
+|-----------|------|-------|---------|-------------|
+| `job_input_prefetch.max_transfers_per_tick` | int | `1–8` | `2` | Max background transfers started per proactive tick |
+| `job_input_prefetch.max_jobs_per_tick` | int | `1–32` | `8` | Max waiting jobs considered per tick |
+
+Job prioritization can use `proactive.site_staging_bias` (deeper staging queues or
+worse recent staging EMA first). Sources prefer higher-utilization replica sites.
+
+### Drop-ins vs searchable policies
+
+Drop-in schedules (`--enable-drop-in-transfers`) are **not** part of the action
+vector. They are attached to each trial’s policy config as an external schedule
+and run independently of which proactive template is selected. Use them to remove
+known long-tail staging outliers while agents search residual policy effects.
 
 ## Objectives
 
@@ -349,7 +421,7 @@ Reward is the negative (log-scaled) aggregated staging time with `aggregation=me
 | Agent | `bayesian_opt` | Black-box optimization only |
 | Agent | `rl_policy` | REINFORCE policy network |
 | Agent | `random_search` | Memoryless uniform baseline |
-| Agent | `bandit` | Template-pair sweep (12 arms) |
+| Agent | `bandit` | Template-pair sweep (16 arms: 4 reactive × 4 proactive) |
 | Objective | `avg_staging_time` | Default |
 | Aggregation | `mean` | Default |
 
@@ -418,7 +490,8 @@ explore/
 - **RL policy network:** [`agents/policy_network.py`](src/datamgmt_explore/agents/policy_network.py), [`agents/rl_policy.py`](src/datamgmt_explore/agents/rl_policy.py), and [`rl_observations.py`](src/datamgmt_explore/rl_observations.py)
 - **New objective:** add under `src/datamgmt_explore/objectives/`, register in `objectives.yaml`
 - **New agent:** subclass `agents/base.py`, wire into `run_exploration.py`
-- **Online RL (future):** may also use `custom_policy_agent` hook in the C++ plugin
+- **Online RL (future):** may also use the reserved `custom_policy_agent` template
+  hook (index `4` in the plugin; not part of the searchable action space today)
 
 ## Related Documentation
 

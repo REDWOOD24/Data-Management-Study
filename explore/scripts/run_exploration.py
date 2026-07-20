@@ -42,7 +42,8 @@ from datamgmt_explore.seeds import method_seed, method_seeds
 from report_reactive_transfer_deltas import maybe_run_checkpoint_report
 
 DEFAULT_AGENTS = ("bayesian_opt", "rl_policy", "random_search")
-DEFAULT_OBJECTIVE = "tail_bulk_staging_cost"
+SUPPORTED_OBJECTIVES = ("avg_staging_time", "tail_bulk_staging_cost")
+DEFAULT_OBJECTIVE = "avg_staging_time"
 DEFAULT_AGGREGATION = "mean"
 DEFAULT_SEED = 42
 DEFAULT_REACTIVE_DELTA_EVERY = 5
@@ -224,6 +225,23 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_AGGREGATION,
         choices=["mean", "mean_of_site_means", "max_site_mean"],
     )
+    parser.add_argument(
+        "--objective",
+        default=DEFAULT_OBJECTIVE,
+        choices=list(SUPPORTED_OBJECTIVES),
+        help=(
+            "Objective function agents optimize (lower is better). "
+            f"Default: {DEFAULT_OBJECTIVE}."
+        ),
+    )
+    parser.add_argument(
+        "--action-space",
+        default=None,
+        help=(
+            "Optional path to an action_space.yaml. "
+            "Default: explore/config/action_space.yaml."
+        ),
+    )
     parser.add_argument("--experiment-name", default=None)
     parser.add_argument("--seed", type=int, default=DEFAULT_SEED, help="Base random seed for reproducible runs")
     parser.add_argument("--max-jobs", type=int, default=None)
@@ -326,7 +344,7 @@ def build_run_config(args: argparse.Namespace, settings, methods: list[str]) -> 
         "seed": args.seed,
         "method_seeds": seeds,
         "trials": args.trials,
-        "objective": DEFAULT_OBJECTIVE,
+        "objective": args.objective,
         "aggregation": args.aggregation,
         "window_mode": args.window_mode,
         "window_size": args.window_size,
@@ -343,6 +361,7 @@ def build_run_config(args: argparse.Namespace, settings, methods: list[str]) -> 
             if settings.drop_in_transfers_file is not None
             else None
         ),
+        "action_space": args.action_space,
         "settings": str(args.settings),
         "cg_sim_bin": str(settings.cg_sim_bin),
     }
@@ -483,6 +502,7 @@ def main() -> int:
     seeds = run_config["method_seeds"]
     print(f"Experiment: {experiment_name}")
     print(f"Base seed: {args.seed}")
+    print(f"Objective: {args.objective}")
     if settings.drop_in_transfers_file is not None:
         print(f"Drop-in transfers: {settings.drop_in_transfers_file}")
     for method_name in methods:
@@ -498,13 +518,15 @@ def main() -> int:
     base_kwargs = {
         "settings": settings,
         "window_config": window_config,
-        "objective_name": DEFAULT_OBJECTIVE,
+        "objective_name": args.objective,
         "aggregation": args.aggregation,
         "max_jobs": args.max_jobs,
         "dry_run": args.dry_run,
         # Per-trial plots run on the main thread (matplotlib is not thread-safe).
         "plot_enabled": False,
     }
+    if args.action_space:
+        base_kwargs["action_space_path"] = settings.resolve(args.action_space)
 
     plot_trials = not args.no_plot and not args.dry_run
 
@@ -519,6 +541,7 @@ def main() -> int:
             methods,
             repo_root=settings.repo_root,
             max_trials=args.trials,
+            objective_name=args.objective,
         )
         timing_csv = LiveMethodTimingCsv(
             experiment_dir,
@@ -591,6 +614,7 @@ def main() -> int:
             methods,
             repo_root=settings.repo_root,
             max_trials=args.trials,
+            objective_name=args.objective,
         )
     if timing_csv is not None:
         timing_csv.write(timing_tracker)
@@ -606,6 +630,7 @@ def main() -> int:
 
     print(f"Experiment: {experiment_name}")
     print(f"Base seed: {args.seed}")
+    print(f"Objective: {args.objective}")
     print(f"Methods: {', '.join(methods)}")
     print(f"Trials per method: {args.trials}")
     for output in method_outputs:

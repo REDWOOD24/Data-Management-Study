@@ -37,7 +37,34 @@ class TrialMeanBars:
     staging_reward: float | None
 
 
-def load_trial_mean_bars(db_path: Path, trial_index: int, pta) -> TrialMeanBars | None:
+def _objective_score(
+    eval_records,
+    *,
+    objective_name: str,
+) -> tuple[float | None, float | None]:
+    """Return (avg_staging_time, plotted_objective_value) for the chosen objective."""
+    mean_staging = mean_staging_time_all_jobs(eval_records)
+    if objective_name == "avg_staging_time":
+        score = mean_staging
+    else:
+        _, _, score = compute_tail_bulk_staging_cost(
+            eval_records,
+            bottom_weight=TAIL_BULK_BOTTOM_WEIGHT,
+            top_weight=TAIL_BULK_TOP_WEIGHT,
+            tail_fraction=STAGING_TAIL_FRACTION,
+        )
+    if score is None or not np.isfinite(score):
+        return mean_staging, None
+    return mean_staging, float(score)
+
+
+def load_trial_mean_bars(
+    db_path: Path,
+    trial_index: int,
+    pta,
+    *,
+    objective_name: str = "avg_staging_time",
+) -> TrialMeanBars | None:
     if not db_path.is_file():
         return None
 
@@ -76,12 +103,9 @@ def load_trial_mean_bars(db_path: Path, trial_index: int, pta) -> TrialMeanBars 
         records,
         jobs_csv=jobs_csv if jobs_csv.is_file() else None,
     )
-    mean_staging = mean_staging_time_all_jobs(eval_records)
-    _, _, staging_reward = compute_tail_bulk_staging_cost(
+    mean_staging, staging_reward = _objective_score(
         eval_records,
-        bottom_weight=TAIL_BULK_BOTTOM_WEIGHT,
-        top_weight=TAIL_BULK_TOP_WEIGHT,
-        tail_fraction=STAGING_TAIL_FRACTION,
+        objective_name=objective_name,
     )
 
     if not transfers and mean_staging is None:
@@ -94,17 +118,27 @@ def load_trial_mean_bars(db_path: Path, trial_index: int, pta) -> TrialMeanBars 
         egress_reactive=egress_reactive,
         egress_proactive=egress_proactive,
         avg_staging_time=mean_staging,
-        staging_reward=staging_reward if np.isfinite(staging_reward) else None,
+        staging_reward=staging_reward,
     )
 
 
-def load_experiment_trial_means(experiment_dir: Path, *, repo_root: Path) -> list[TrialMeanBars]:
+def load_experiment_trial_means(
+    experiment_dir: Path,
+    *,
+    repo_root: Path,
+    objective_name: str = "avg_staging_time",
+) -> list[TrialMeanBars]:
     pta = _load_transfer_analysis(repo_root)
     summaries: list[TrialMeanBars] = []
 
     for trial_dir in sorted(experiment_dir.glob("trial_*")):
         trial_index = int(trial_dir.name.split("_", 1)[1])
-        summary = load_trial_mean_bars(trial_dir / "events.db", trial_index, pta)
+        summary = load_trial_mean_bars(
+            trial_dir / "events.db",
+            trial_index,
+            pta,
+            objective_name=objective_name,
+        )
         if summary is not None:
             summaries.append(summary)
 

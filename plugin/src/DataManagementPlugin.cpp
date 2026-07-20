@@ -49,7 +49,9 @@ JobQueue DataManagementPlugin::getWorkload()
 
 Job* DataManagementPlugin::assignJob(Job* job)
 {
-  return di->assignJob(job);
+  Job* assigned = di->assignJob(job);
+  po->note_job_allocated(assigned);
+  return assigned;
 }
 
 void DataManagementPlugin::onSimulationStart()
@@ -67,6 +69,7 @@ void DataManagementPlugin::onSimulationEnd()
 
 void DataManagementPlugin::onJobExecutionStart(Job* job, simgrid::s4u::Exec const& ex)
 {
+   po->note_job_execution_start(job);
    ou->onJobExecutionStart(job,ex);
 }
 
@@ -86,6 +89,7 @@ void DataManagementPlugin::onJobTransferStart(Job* job, simgrid::s4u::Mess const
 
 void DataManagementPlugin::onJobTransferEnd(Job* job, simgrid::s4u::Mess const& me)
 {
+   po->note_job_allocation_finished(job);
    ou->onJobTransferEnd(job,me);
 }
 

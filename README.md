@@ -19,6 +19,9 @@ The project simulates a distributed computing environment with multiple sites, f
   * Storage Rebalance Policy
   * Network Aware Rebalance Policy
   * Hotset Replication Policy
+  * Job Input Prefetch Policy
+  * Optional one-shot drop-in transfers scheduled independently of the periodic templates
+  * On-demand reactive transfer source selection when jobs request missing inputs
 
 ## Repository Structure
 
@@ -71,19 +74,112 @@ The number of generated jobs is configured in `config/config.json`.
 
 ### Data Management Policies
 
-The plugin registers several background data-management policies.
+The dispatcher plugin (`plugin/src/policy.cpp`) implements the data-management
+policy stack configured by [`config/data_policy_config.json`](config/data_policy_config.json)
+(and, during exploration, by generated per-trial copies of that file).
 
-#### Storage Rebalance Policy
+The stack has three cooperating layers:
 
-Moves files from highly utilized sites to lower-utilized sites.
+1. **Reactive transfers** — when a job needs an input that is not local, the
+   plugin chooses a remote source replica (`onFileRequest`).
+2. **Periodic proactive templates** — one active background template runs on a
+   fixed interval (default **500 s**) and may start a small number of background
+   transfers per tick (default **1**, except job-input prefetch which is tunable).
+3. **Drop-in transfers** — optional one-shot background transfers loaded from a
+   standalone schedule file (`drop_in_transfers_file`). They are scheduled by
+   absolute simulation time and do **not** change which reactive/proactive
+   template is active.
 
-#### Network Aware Rebalance Policy
+Exploration agents (see [`explore/README.md`](explore/README.md)) search the
+tunable fields of this config; several intensity knobs remain fixed today
+(`proactive.interval = 500`, most templates’ `max_transfers_per_tick = 1`).
 
-Chooses file movement candidates based on network conditions such as link load, bandwidth, latency, and estimated transfer time.
+#### Reactive transfer
 
-#### Hotset Replication Policy
+Triggered on demand when CGSim asks the plugin for a source site for a missing
+input file.
 
-Replicates frequently available or “hot” files until a target replica count is reached.
+| Behavior | Description |
+| -------- | ----------- |
+| Prefer local replica | If a resting replica already exists at the job’s compute site, use it and skip remote transfer. |
+| Remote source templates | When multiple remote replicas exist, choose among: `first_replica`, `least_utilized_source`, `most_utilized_source`, `random_replica`. |
+| Random seed | Used only by `random_replica`. |
+
+Reactive mode is always enabled in the exploration action space (masked on).
+
+#### Proactive transfer templates
+
+Exactly one proactive template is active per run (`proactive.transfer_template`).
+Background transfers use `COPY` or `MOVE` (`proactive.data_transfer_mode`).
+
+##### Storage Rebalance Policy (template `0`)
+
+Moves or copies files from high storage-utilization sites to low-utilization
+sites.
+
+* High / low utilization thresholds (must satisfy high &lt; low and a minimum gap).
+* File pick mode: `first_fit`, `largest_fit`, `smallest_fit`, `random_fit`.
+* Optional skip when the destination already holds a replica of the candidate file.
+
+##### Network Aware Rebalance Policy (template `1`)
+
+Similar source→destination rebalance, but candidates are filtered/ranked using
+path metrics:
+
+* Path metric: `estimated_transfer_time`, `link_load`, or `bandwidth_only`.
+* `max_path_load` cap on acceptable path load.
+* Same high/low utilization and file-pick controls as storage rebalance.
+
+##### Hotset Replication Policy (template `2`)
+
+Replicates files whose replica prevalence is above a hotness threshold until a
+target replica count is reached.
+
+* `hotness_threshold` and `target_replica_count` are searchable.
+* **Candidate destination policy** (searchable):
+  * `requesting_sites_first` — prefer destinations that currently have
+    allocated-but-not-started jobs missing this file, then fall back to others.
+  * `least_utilized_among_requesting` — restrict to those requesting sites when
+    any exist; otherwise fall back to all eligible destinations.
+* Destination ranking can further apply the global **site staging bias** below.
+
+##### Job Input Prefetch Policy (template `3`)
+
+Online, job-aware prestaging similar in spirit to drop-ins, but driven by the
+live set of allocated jobs that have not started execution yet:
+
+* Prefetches missing input files to each waiting job’s compute site.
+* `max_jobs_per_tick` (1–32) limits how many waiting jobs are considered per tick.
+* `max_transfers_per_tick` (1–8) limits how many background transfers start per tick.
+* Job priority can incorporate the global site staging bias (help sites with
+  deeper staging queues / worse recent staging first).
+
+##### Site staging bias (global proactive knob)
+
+`proactive.site_staging_bias` affects destination/job ranking for hotset and
+job-input prefetch:
+
+| Value | Name | Effect |
+| ----- | ---- | ------ |
+| `0` | `off` | No staging bias; fall back to storage-utilization ordering. |
+| `1` | `high_staging_queue` | Prefer sites with more allocated-but-not-started jobs. |
+| `2` | `high_recent_staging` | Prefer sites with higher EMA of recent alloc→exec staging time. |
+
+The plugin tracks waiting jobs via assignment / allocation-finished /
+execution-start callbacks so “requesting sites” and staging pressure are
+observable without changing the proactive interval.
+
+#### Drop-in transfers
+
+Configured by `Data_Management_Policy.drop_in_transfers_file` pointing at a JSON
+schedule of `{time, filename, src_site, dst_site, mode}` entries. Drop-ins are
+independent of the active proactive template and are useful for prestaging known
+outlier jobs before allocation.
+
+#### Custom policy agent hook
+
+Template index `4` (`custom_policy_agent`) is reserved for a future online agent
+hook and currently raises “not implemented” if selected.
 
 ### Event Logging
 
@@ -157,7 +253,7 @@ Example settings include:
 | `Dispatcher_Plugin`            | Path to the compiled dispatcher plugin      |
 | `Num_of_Jobs`                  | Number of synthetic jobs to generate        |
 | `output_file`                  | SQLite database file used for event logging |
-| `data_policy`                  | data policy config JSON file                |
+| `data_policy`                  | Path to the data-management policy JSON (`data_policy_config.json`). Defines reactive source selection, the active proactive template and its parameters, optional site-staging bias, and optional `drop_in_transfers_file`. See **Data Management Policies** above and [`explore/README.md`](explore/README.md) for the searchable action-space view of the same fields. |
 
 ## Generating Configuration Files
 
@@ -313,9 +409,9 @@ The plugin is organized into the following main components:
 
 | Component                  | Purpose                                           |
 | -------------------------- | ------------------------------------------------- |
-| `DataManagementPlugin.cpp` | Main plugin entry point and CGSim callback wiring, mainly hooking reactive transfers to CGSim on demand |
+| `DataManagementPlugin.cpp` | Main plugin entry point and CGSim callback wiring (job assignment, allocation/execution hooks for staging tracking, reactive `onFileRequest`, background-transfer logging) |
 | `dispatcher.cpp`           | Job placement and CPU selection logic             |
 | `workload_manager.cpp`     | Synthetic workload generation                     |
-| `policy.cpp`               | data-management policies implementation           |
+| `policy.cpp`               | Data-management policy stack: reactive source selection, proactive templates (storage / network / hotset / job-input prefetch), site-staging bias, and drop-in transfer scheduling |
 | `output.cpp`               | SQLite event logging and utilization metrics      |
 

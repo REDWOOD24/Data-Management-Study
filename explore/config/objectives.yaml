@@ -1,6 +1,6 @@
-default_objective: tail_bulk_staging_cost
+default_objective: avg_staging_time
 default_aggregation: mean
-reward_transform: neg_log1p
+reward_transform: identity
 
 objectives:
   avg_staging_time:

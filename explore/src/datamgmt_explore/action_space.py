@@ -31,6 +31,8 @@ class ActionSpace:
     file_pick_names: list[str]
     path_metric_names: list[str]
     transfer_modes: list[str]
+    hotset_destination_policy_names: list[str]
+    site_staging_bias_names: list[str]
 
     @classmethod
     def from_yaml(cls, path: Path | str) -> ActionSpace:
@@ -57,6 +59,18 @@ class ActionSpace:
             file_pick_names=list(raw.get("file_pick_names", [])),
             path_metric_names=list(raw.get("path_metric_names", [])),
             transfer_modes=list(raw.get("transfer_modes", ["COPY", "MOVE"])),
+            hotset_destination_policy_names=list(
+                raw.get(
+                    "hotset_destination_policy_names",
+                    ["requesting_sites_first", "least_utilized_among_requesting"],
+                )
+            ),
+            site_staging_bias_names=list(
+                raw.get(
+                    "site_staging_bias_names",
+                    ["off", "high_staging_queue", "high_recent_staging"],
+                )
+            ),
         )
 
     @property
